@@ -1162,16 +1162,24 @@
                 if (!phone || phone === 'undefined' || phone === 'null') return null;
                 
                 let phoneStr = phone.toString().trim();
-                if (phoneStr.includes('E+') || phoneStr.includes('e+')) {
+                
+                // Handle scientific notation
+                if (phoneStr.includes('E+') || phoneStr.includes('e+') || phoneStr.includes('E-') || phoneStr.includes('e-')) {
                     try {
-                        phoneStr = parseInt(parseFloat(phoneStr)).toString();
+                        // Use Number() for proper parsing, then convert to string without scientific notation
+                        const num = Number(phoneStr);
+                        // Use toFixed(0) to get the full number without decimals
+                        phoneStr = num.toFixed(0);
                     } catch (e) {
                         return null;
                     }
                 }
                 
+                // Remove all non-digits
                 const normalized = phoneStr.replace(/\D/g, '');
-                return normalized.length >= 3 ? normalized : null;
+                
+                // Ensure it's a valid phone number length
+                return normalized.length >= 7 ? normalized : null;
             }
             
             detectCountry(phone) {
@@ -1818,6 +1826,46 @@
 
                 await resultsWritable.write(termsContent);
                 await resultsWritable.close();
+                
+                // Extract phone number prefixes from all filenames
+                const filenamePrefixes = new Set();
+                for (let file of uploadedFiles) {
+                    // Match pattern: number followed by space and name
+                    const match = file.name.match(/^(\d+)\s+/);
+                    if (match) {
+                        filenamePrefixes.add(match[1]);
+                    }
+                }
+
+                addLog('INFO', `Found ${filenamePrefixes.size} phone number prefixes in filenames`);
+
+                // Create clean common phones list (excluding filename prefixes)
+                const cleanCommonPhones = [];
+                for (const [phone, files] of Object.entries(commonPhones)) {
+                    if (!filenamePrefixes.has(phone)) {
+                        cleanCommonPhones.push(phone);
+                    }
+                }
+
+                // Sort by phone number
+                cleanCommonPhones.sort();
+
+                addLog('INFO', `Clean common phones: ${cleanCommonPhones.length} (excluded ${Object.keys(commonPhones).length - cleanCommonPhones.length} that were filename prefixes)`);
+
+                // Write clean common phones file
+                const cleanPhonesFile = await resultsDir.getFileHandle('clean_common_phones.txt', { create: true });
+                const cleanPhonesWritable = await cleanPhonesFile.createWritable();
+
+                let cleanContent = `Clean Common Phone Numbers\n`;
+                cleanContent += `(Excluding numbers that are filename prefixes)\n`;
+                cleanContent += `Total: ${cleanCommonPhones.length}\n`;
+                cleanContent += `${'='.repeat(50)}\n`;
+                cleanContent += cleanCommonPhones.join('\n');
+
+                await cleanPhonesWritable.write(cleanContent);
+                await cleanPhonesWritable.close();
+
+                addLog('INFO', `Created clean_common_phones.txt: ${cleanCommonPhones.length} numbers`);
                 
                 addLog('INFO', 'Merge complete!');
                 
