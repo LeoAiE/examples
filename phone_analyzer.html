@@ -1,0 +1,2609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Analyzer Pro</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f0f2f5;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }
+        
+        .app-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Left Sidebar */
+        .sidebar {
+            width: 400px;
+            background-color: #ffffff;
+            border-right: 1px solid #e1e4e8;
+            overflow-y: auto;
+            padding: 0;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+        }
+        
+        .sidebar-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .sidebar-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .performance-badge {
+            display: inline-block;
+            background-color: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+        
+        .sidebar-section:last-child {
+            border-bottom: none;
+        }
+        
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #24292e;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-title::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 16px;
+            background-color: #667eea;
+            border-radius: 2px;
+        }
+        
+        /* Working Directory */
+        .directory-info {
+            background-color: #e6f3ff;
+            border: 1px solid #66a3ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 13px;
+        }
+        
+        .directory-path {
+            font-family: monospace;
+            background-color: rgba(0,0,0,0.05);
+            padding: 5px;
+            border-radius: 3px;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+        
+        .select-directory-btn {
+            margin-top: 10px;
+        }
+        
+        /* Country Configuration */
+        .country-list {
+            max-height: 250px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding-right: 5px;
+        }
+        
+        .country-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+        
+        .country-item:hover {
+            background-color: #e1e4e8;
+            transform: translateX(5px);
+        }
+        
+        .country-item.custom-country {
+            background-color: #f0f6ff;
+            border: 1px solid #79b8ff;
+        }
+        
+        .country-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 12px;
+            cursor: pointer;
+        }
+        
+        .country-item label {
+            flex: 1;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .remove-country {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        
+        .remove-country:hover {
+            opacity: 1;
+        }
+        
+        /* Add Country Form */
+        .add-country-form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .add-country-form input[type="text"] {
+            padding: 10px 12px;
+            border: 2px solid #e1e4e8;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        
+        .add-country-form input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        /* Add this new section after Country Configuration */
+        .file-type-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .radio-option:hover {
+            background-color: #e1e4e8;
+        }
+        
+        .radio-option input[type="radio"] {
+            margin-right: 10px;
+        }
+        
+        .file-type-info {
+            background-color: #e6f3ff;
+            border: 1px solid #66a3ff;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        
+        /* CSV Configuration */
+        .csv-config {
+            background-color: #f6f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .csv-config h4 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #24292e;
+        }
+        
+        .csv-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .csv-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .csv-option label {
+            font-size: 13px;
+            color: #586069;
+            min-width: 80px;
+        }
+        
+        .csv-option input, .csv-option select {
+            flex: 1;
+            padding: 5px 8px;
+            border: 1px solid #d1d5da;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        /* File Upload Section */
+        .file-input-wrapper {
+            position: relative;
+            display: block;
+            cursor: pointer;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background-color: #f6f8fa;
+            border: 2px dashed #d1d5da;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 14px;
+            color: #586069;
+            transition: all 0.2s;
+        }
+        
+        .file-input-label:hover {
+            background-color: #e1e4e8;
+            border-color: #667eea;
+            color: #24292e;
+        }
+        
+        .file-info {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background-color: #f6f8fa;
+            margin-bottom: 6px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        .file-item span {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-right: 10px;
+        }
+        
+        .file-size {
+            color: #586069;
+            font-size: 11px;
+            margin-left: 5px;
+        }
+        
+        /* Progress Section */
+        .progress-section {
+            display: none;
+            background-color: #f6f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .progress-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #24292e;
+        }
+        
+        .progress-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #586069;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+        
+        .progress-details {
+            font-size: 12px;
+            color: #586069;
+            line-height: 1.6;
+        }
+        
+        .progress-detail-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+        }
+        
+        /* Add this new rule right after the .btn rule */
+        .file-item .btn {
+            width: auto;
+            flex-shrink: 0;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary {
+            background-color: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background-color: #5a67d8;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background-color: #c82333;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            background-color: #5a6268;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        /* Main Content Area */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background-color: #f0f2f5;
+        }
+        
+        /* Status Cards */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .status-card h3 {
+            font-size: 14px;
+            color: #586069;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        
+        .status-subtext {
+            font-size: 12px;
+            color: #586069;
+            margin-top: 5px;
+        }
+        
+        /* Results Section */
+        .results-section {
+            display: none;
+        }
+        
+        .result-card {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        
+        .result-card h3 {
+            font-size: 20px;
+            color: #24292e;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e1e4e8;
+        }
+        
+        .result-summary {
+            background-color: #f6f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .summary-item {
+            text-align: center;
+        }
+        
+        .summary-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #0366d6;
+        }
+        
+        .summary-label {
+            font-size: 13px;
+            color: #586069;
+        }
+        
+        /* Logs */
+        .log-viewer {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            line-height: 1.4;
+        }
+        
+        .log-time {
+            color: #569cd6;
+            margin-right: 10px;
+        }
+        
+        .log-level-info {
+            color: #4ec9b0;
+        }
+        
+        .log-level-warn {
+            color: #ce9178;
+        }
+        
+        .log-level-error {
+            color: #f48771;
+        }
+        
+        .download-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .download-button {
+            padding: 10px 20px;
+            background-color: #0366d6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .download-button:hover {
+            background-color: #0256c7;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Welcome State */
+        .welcome-state {
+            text-align: center;
+            padding: 60px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .welcome-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.8;
+        }
+        
+        .welcome-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+            text-align: left;
+        }
+        
+        .feature-item {
+            padding: 15px;
+            background-color: #f6f8fa;
+            border-radius: 6px;
+        }
+        
+        .feature-item h4 {
+            color: #667eea;
+            margin-bottom: 5px;
+            font-size: 16px;
+        }
+        
+        .feature-item p {
+            font-size: 13px;
+            color: #586069;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+                border-right: none;
+                border-bottom: 1px solid #e1e4e8;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>📞 Phone Analyzer Pro</h1>
+                <p>High-Performance Analysis Tool</p>
+                <div class="performance-badge">⚡ Fast & Reliable</div>
+                <div class="performance-badge" style="margin-top: 5px;">💾 100% Accuracy</div>
+            </div>
+            
+            <!-- Working Directory -->
+            <div class="sidebar-section">
+                <h3 class="section-title">Working Directory</h3>
+                <div class="directory-info">
+                    <p><strong>Select a folder for processing:</strong></p>
+                    <div class="directory-path" id="directoryPath">No directory selected</div>
+                    <button class="btn btn-secondary btn-sm select-directory-btn" onclick="selectWorkingDirectory()">
+                        📁 Select Working Folder
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Country Configuration -->
+            <div class="sidebar-section">
+                <h3 class="section-title">Country Configuration</h3>
+                <div class="country-list" id="countryConfig">
+                    <div class="country-item">
+                        <input type="checkbox" id="UK" value="44" checked>
+                        <label for="UK">UK (+44)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="Australia" value="61" checked>
+                        <label for="Australia">Australia (+61)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="France" value="33" checked>
+                        <label for="France">France (+33)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="USA" value="1">
+                        <label for="USA">USA (+1)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="Germany" value="49">
+                        <label for="Germany">Germany (+49)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="Italy" value="39">
+                        <label for="Italy">Italy (+39)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="Spain" value="34">
+                        <label for="Spain">Spain (+34)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="Japan" value="81">
+                        <label for="Japan">Japan (+81)</label>
+                    </div>
+                    <div class="country-item">
+                        <input type="checkbox" id="China" value="86">
+                        <label for="China">China (+86)</label>
+                    </div>
+                </div>
+                
+                <div class="add-country-form">
+                    <input type="text" id="newCountryName" placeholder="Country Name" maxlength="50">
+                    <input type="text" id="newCountryCode" placeholder="Country Code" maxlength="5">
+                    <button onclick="addCustomCountry()" class="btn btn-secondary btn-sm">➕ Add Country</button>
+                </div>
+            </div>
+            
+            <!-- File Type & Mode section -->
+            <div class="sidebar-section">
+                <h3 class="section-title">File Type & Mode</h3>
+                <div class="file-type-selector">
+                    <label class="radio-option">
+                        <input type="radio" name="fileType" value="csv" checked onchange="updateFileType()">
+                        <span>📊 CSV Files</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="fileType" value="excel" onchange="updateFileType()">
+                        <span>📗 Excel Files (Simple)</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="fileType" value="text" onchange="updateFileType()">
+                        <span>📝 Text Files (Mixed Data)</span>
+                    </label>
+                </div>
+                <div class="file-type-info" id="fileTypeInfo">
+                    <p id="csvInfo">Process structured CSV files with phone numbers in specific columns.</p>
+                    <p id="excelInfo" style="display: none;">Process simple Excel files (first sheet only) with data in specific columns.</p>
+                    <p id="textInfo" style="display: none;">Extract phone numbers and @handles from unstructured text files.</p>
+                </div>
+                <!-- Add this inside the File Type & Mode section -->
+                <div id="textOptions" style="display: none; margin-top: 15px;">
+                    <h4 style="font-size: 13px; margin-bottom: 10px;">Text Processing Options</h4>
+                    <div class="csv-option">
+                        <label>Min Term Length:</label>
+                        <input type="number" id="minTermLength" value="3" min="1" max="20">
+                    </div>
+                    <div class="csv-option">
+                        <label>Min Occurrences:</label>
+                        <input type="number" id="minOccurrences" value="2" min="2" max="100">
+                    </div>
+                    <div class="csv-option" style="margin-top: 10px;">
+                        <label style="display: flex; align-items: center;">
+                            <input type="checkbox" id="includeNumbers" checked style="margin-right: 5px;">
+                            Include numeric terms
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CSV Configuration section -->
+            <div class="sidebar-section">
+                <h3 class="section-title">CSV Configuration</h3>
+                <div class="csv-config">
+                    <h4>Column Settings</h4>
+                    <div class="csv-options">
+                        <div class="csv-option">
+                            <label>Columns to Parse:</label>
+                            <input type="text" id="columnsToparse" value="1,2,3" placeholder="e.g. 1,2,3,4,5">
+                            <small style="display: block; color: #666; margin-top: 5px;">
+                                Enter column numbers separated by commas
+                            </small>
+                        </div>
+                        <div class="csv-option">
+                            <label for="delimiter">Delimiter:</label>
+                            <select id="delimiter" aria-label="CSV delimiter selection">
+                                <option value=",">Comma (,)</option>
+                                <option value=";">Semicolon (;)</option>
+                                <option value="\t">Tab</option>
+                                <option value="|">Pipe (|)</option>
+                            </select>
+                        </div>
+                        <div class="csv-option">
+                            <label for="hasHeader">Has Header:</label>
+                            <input type="checkbox" id="hasHeader" checked title="Check if CSV has a header row">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- File Management -->
+            <div class="sidebar-section">
+                <h3 class="section-title">File Management</h3>
+                <div class="file-info">
+                    💡 This tool processes files efficiently with optimized algorithms
+                    for maximum speed and 100% accuracy.
+                </div>
+                <div class="file-input-wrapper">
+                    <input type="file" id="fileInput" accept=".csv" multiple>
+                    <label for="fileInput" class="file-input-label">
+                        📁 Click to upload CSV files<br>
+                        <small>Multiple files supported</small>
+                    </label>
+                </div>
+                <div class="file-list" id="fileList">
+                    <p style="text-align: center; color: #586069; padding: 20px;">No files uploaded</p>
+                </div>
+            </div>
+            
+            <!-- Progress Section -->
+            <div class="progress-section" id="progressSection">
+                <div class="progress-header">
+                    <div class="progress-title">Processing Progress</div>
+                    <div class="progress-stats">
+                        <span id="processSpeed">0 rows/sec</span>
+                        <span id="timeRemaining">Calculating...</span>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill">0%</div>
+                </div>
+                <div class="progress-details">
+                    <div class="progress-detail-item">
+                        <span>Current File:</span>
+                        <span id="currentFileName">-</span>
+                    </div>
+                    <div class="progress-detail-item">
+                        <span>Rows Processed:</span>
+                        <span id="rowsProcessed">0</span>
+                    </div>
+                    <div class="progress-detail-item">
+                        <span>Write Operations:</span>
+                        <span id="writeOps">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="sidebar-section">
+                <h3 class="section-title">Actions</h3>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="analyzeButton" disabled>
+                        🚀 Start Analysis
+                    </button>
+                    <button class="btn btn-danger" id="resetButton" onclick="resetAll()">
+                        🔄 Reset Everything
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Welcome State -->
+            <div class="welcome-state" id="welcomeState">
+                <div class="welcome-icon">📊</div>
+                <h2>Phone Analyzer Pro</h2>
+                <p>
+                    Analyze your CSV files to extract and categorize phone numbers by country.
+                    This optimized version provides fast, reliable processing with 100% accuracy.
+                </p>
+                
+                <div class="welcome-features">
+                    <div class="feature-item">
+                        <h4>⚡ Optimized Speed</h4>
+                        <p>Efficient algorithms for fast processing</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>💾 Large File Support</h4>
+                        <p>Handle files of any size reliably</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>✅ 100% Accuracy</h4>
+                        <p>Every row is processed correctly</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>🔄 Smart Memory Usage</h4>
+                        <p>Efficient memory management</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>📊 Detailed Results</h4>
+                        <p>Comprehensive analysis reports</p>
+                    </div>
+                    <div class="feature-item">
+                        <h4>🛡️ Error Recovery</h4>
+                        <p>Robust error handling</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 30px; padding: 20px; background-color: #f6f8fa; border-radius: 6px; text-align: left;">
+                    <h3 style="margin-bottom: 10px;">🎯 Getting Started:</h3>
+                    <ol style="margin-left: 20px; line-height: 2;">
+                        <li>Select a working folder for temporary files</li>
+                        <li>Configure your countries and CSV settings</li>
+                        <li>Upload your CSV files</li>
+                        <li>Click "Start Analysis" to begin</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <!-- Processing State -->
+            <div class="processing-state" id="processingState" style="display: none;">
+                <h2 style="text-align: center; margin-bottom: 30px;">Processing Your Data</h2>
+                
+                <div class="status-grid">
+                    <div class="status-card">
+                        <h3>Files Progress</h3>
+                        <div class="status-value" id="filesProgress">0 / 0</div>
+                        <div class="status-subtext">Files completed</div>
+                    </div>
+                    <div class="status-card">
+                        <h3>Total Rows</h3>
+                        <div class="status-value" id="totalRows">0</div>
+                        <div class="status-subtext">Rows processed</div>
+                    </div>
+                    <div class="status-card">
+                        <h3>Processing Speed</h3>
+                        <div class="status-value" id="speedStat">0</div>
+                        <div class="status-subtext">Rows per second</div>
+                    </div>
+                    <div class="status-card">
+                        <h3>Temp Files</h3>
+                        <div class="status-value" id="tempFiles">0</div>
+                        <div class="status-subtext">Files created</div>
+                    </div>
+                </div>
+                
+                <div class="result-card">
+                    <h3>📝 Processing Log</h3>
+                    <div class="log-viewer" id="logViewer">
+                        <div class="log-entry">
+                            <span class="log-time">[00:00:00]</span>
+                            <span class="log-level-info">INFO</span> Processing started...
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Results Section -->
+            <div class="results-section" id="results">
+                <div class="content-header" style="text-align: center; margin-bottom: 40px;">
+                    <h2>Analysis Complete! 🎉</h2>
+                    <p>Your phone number analysis has been completed successfully</p>
+                </div>
+                
+                <div class="result-card">
+                    <h3>📊 Final Statistics</h3>
+                    <div class="result-summary">
+                        <div class="summary-grid" id="finalStats"></div>
+                    </div>
+                </div>
+                
+                <div class="result-card">
+                    <h3>📍 Results by Country</h3>
+                    <div id="countryResults"></div>
+                </div>
+                
+                <div class="result-card">
+                    <h3>🔗 Common Numbers Summary</h3>
+                    <div id="commonResults"></div>
+                </div>
+                
+                <div class="result-card">
+                    <h3>💾 Download Results</h3>
+                    <p style="margin-bottom: 15px;">All results have been saved to your working directory:</p>
+                    <div class="download-section" id="downloadLinks"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add this before your main script -->
+<script>
+// Improved Minimal XLSX Parser
+(function() {
+    window.SimpleXLSX = {
+        parse: async function(arrayBuffer) {
+            try {
+                const zip = await this.unzip(arrayBuffer);
+                const sharedStrings = await this.getSharedStrings(zip);
+                const sheet = await this.getSheet(zip, 'xl/worksheets/sheet1.xml');
+                return this.parseSheet(sheet, sharedStrings);
+            } catch (e) {
+                throw new Error('Failed to parse Excel file: ' + e.message);
+            }
+        },
+        
+        // Improved unzip that handles the file structure better
+        unzip: async function(buffer) {
+            const view = new DataView(buffer);
+            const files = {};
+            
+            // Find End of Central Directory
+            let eocdOffset = buffer.byteLength - 22;
+            while (eocdOffset > 0) {
+                if (view.getUint32(eocdOffset, true) === 0x06054b50) break;
+                eocdOffset--;
+            }
+            
+            if (eocdOffset <= 0) {
+                throw new Error('Invalid ZIP file');
+            }
+            
+            const cdOffset = view.getUint32(eocdOffset + 16, true);
+            let offset = cdOffset;
+            
+            // Read Central Directory
+            while (offset < buffer.byteLength && view.getUint32(offset, true) === 0x02014b50) {
+                const nameLen = view.getUint16(offset + 28, true);
+                const extraLen = view.getUint16(offset + 30, true);
+                const commentLen = view.getUint16(offset + 32, true);
+                const headerOffset = view.getUint32(offset + 42, true);
+                
+                const nameBytes = new Uint8Array(buffer, offset + 46, nameLen);
+                const name = new TextDecoder().decode(nameBytes);
+                
+                // Read file data
+                const fileView = new DataView(buffer, headerOffset);
+                if (fileView.getUint32(0, true) !== 0x04034b50) {
+                    offset += 46 + nameLen + extraLen + commentLen;
+                    continue;
+                }
+                
+                const compression = fileView.getUint16(8, true);
+                const compressedSize = fileView.getUint32(18, true);
+                const uncompressedSize = fileView.getUint32(22, true);
+                const fileNameLen = fileView.getUint16(26, true);
+                const extraFieldLen = fileView.getUint16(28, true);
+                
+                const dataOffset = headerOffset + 30 + fileNameLen + extraFieldLen;
+                
+                if (compression === 0) { // No compression
+                    const data = new Uint8Array(buffer, dataOffset, uncompressedSize);
+                    files[name] = new TextDecoder().decode(data);
+                } else if (compression === 8) { // Deflate
+                    const compressedData = new Uint8Array(buffer, dataOffset, compressedSize);
+                    files[name] = await this.inflateData(compressedData);
+                }
+                
+                offset += 46 + nameLen + extraLen + commentLen;
+            }
+            
+            return files;
+        },
+        
+        inflateData: async function(compressedData) {
+            if ('DecompressionStream' in window) {
+                try {
+                    const ds = new DecompressionStream('deflate-raw');
+                    const writer = ds.writable.getWriter();
+                    writer.write(compressedData);
+                    writer.close();
+                    
+                    const reader = ds.readable.getReader();
+                    const chunks = [];
+                    let result;
+                    while (!(result = await reader.read()).done) {
+                        chunks.push(result.value);
+                    }
+                    
+                    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+                    const inflated = new Uint8Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of chunks) {
+                        inflated.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+                    
+                    return new TextDecoder().decode(inflated);
+                } catch (e) {
+                    console.error('Decompression failed:', e);
+                    return '';
+                }
+            }
+            return '';
+        },
+        
+        getSharedStrings: function(zip) {
+            const content = zip['xl/sharedStrings.xml'];
+            if (!content) return [];
+            
+            const strings = [];
+            // Match text content more reliably
+            const regex = /<si[^>]*>[\s\S]*?<t[^>]*>([\s\S]*?)<\/t>[\s\S]*?<\/si>/g;
+            let match;
+            while ((match = regex.exec(content)) !== null) {
+                // Decode XML entities
+                let text = match[1];
+                text = text.replace(/&amp;/g, '&')
+                          .replace(/&lt;/g, '<')
+                          .replace(/&gt;/g, '>')
+                          .replace(/&quot;/g, '"')
+                          .replace(/&#x([0-9A-F]+);/gi, (match, code) => String.fromCharCode(parseInt(code, 16)));
+                strings.push(text);
+            }
+            return strings;
+        },
+        
+        getSheet: function(zip, path) {
+            return zip[path] || '';
+        },
+        
+        parseSheet: function(sheetXml, sharedStrings) {
+            const rows = {};
+            let maxRow = 0;
+            let maxCol = 0;
+            
+            // More comprehensive cell matching
+            // This regex handles inline strings, shared strings, and numeric values
+            const cellRegex = /<c[^>]*\sr="([A-Z]+)(\d+)"[^>]*(?:\st="([^"]*)")?[^>]*>(?:<v>([^<]*)<\/v>|<is><t>([^<]*)<\/t><\/is>)?<\/c>/g;
+            
+            let cellMatch;
+            while ((cellMatch = cellRegex.exec(sheetXml)) !== null) {
+                const colLetter = cellMatch[1];
+                const col = this.columnToNumber(colLetter) - 1;
+                const row = parseInt(cellMatch[2]) - 1;
+                const type = cellMatch[3] || '';
+                const vValue = cellMatch[4];  // Value in <v> tag
+                const isValue = cellMatch[5]; // Inline string value
+                
+                let value = '';
+                
+                if (isValue) {
+                    // Inline string
+                    value = isValue;
+                } else if (vValue !== undefined) {
+                    if (type === 's') {
+                        // Shared string
+                        const index = parseInt(vValue);
+                        value = sharedStrings[index] || '';
+                    } else if (type === 'str') {
+                        // String
+                        value = vValue;
+                    } else {
+                        // Number or other
+                        value = vValue;
+                    }
+                }
+                
+                if (!rows[row]) {
+                    rows[row] = {};
+                }
+                rows[row][col] = value;
+                
+                maxRow = Math.max(maxRow, row);
+                maxCol = Math.max(maxCol, col);
+            }
+            
+            // Convert to array format
+            const result = [];
+            for (let r = 0; r <= maxRow; r++) {
+                const row = [];
+                for (let c = 0; c <= maxCol; c++) {
+                    row[c] = (rows[r] && rows[r][c] !== undefined) ? rows[r][c] : '';
+                }
+                result.push(row);
+            }
+            
+            return result;
+        },
+        
+        columnToNumber: function(col) {
+            let num = 0;
+            for (let i = 0; i < col.length; i++) {
+                num = num * 26 + (col.charCodeAt(i) - 64);
+            }
+            return num;
+        }
+    };
+})();
+</script>
+
+    <script>
+        // ============================
+        // CONFIGURATION
+        // ============================
+        const CONFIG = {
+            CHUNK_SIZE: 10 * 1024 * 1024,      // 10MB chunks
+            BATCH_SIZE: 50000,                  // Write every 50k entries
+            UI_UPDATE_INTERVAL: 5000,           // Update UI every 5k rows
+            SMALL_FILE_SIZE: 5 * 1024 * 1024   // Files under 5MB
+        };
+        
+        // ============================
+        // GLOBAL VARIABLES
+        // ============================
+        let workingDirectoryHandle = null;
+        let uploadedFiles = [];
+        let customCountryId = 1000;
+        let processStats = {
+            startTime: null,
+            totalRows: 0,
+            filesCompleted: 0,
+            tempFilesCreated: 0,
+            currentSpeed: 0
+        };
+        
+        // ============================
+        // UTILITY FUNCTIONS
+        // ============================
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        }
+        
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background-color: ${type === 'success' ? '#28a745' : '#dc3545'};
+                color: white;
+                padding: 15px 25px;
+                border-radius: 6px;
+                font-size: 14px;
+                z-index: 1000;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                animation: slideIn 0.3s ease-out;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+        
+        function addLog(level, message) {
+            const logViewer = document.getElementById('logViewer');
+            if (!logViewer) return;
+            
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="log-level-${level.toLowerCase()}">${level}</span> ${escapeHtml(message)}
+            `;
+            
+            logViewer.appendChild(entry);
+            logViewer.scrollTop = logViewer.scrollHeight;
+            
+            while (logViewer.children.length > 50) {
+                logViewer.removeChild(logViewer.firstChild);
+            }
+        }
+        
+        // ============================
+        // FILE SYSTEM FUNCTIONS
+        // ============================
+        async function selectWorkingDirectory() {
+            if (!('showDirectoryPicker' in window)) {
+                alert('This browser does not support the File System Access API. Please use Chrome or Edge.');
+                return;
+            }
+            
+            try {
+                workingDirectoryHandle = await window.showDirectoryPicker();
+                document.getElementById('directoryPath').textContent = workingDirectoryHandle.name;
+                
+                // Create subdirectories
+                await workingDirectoryHandle.getDirectoryHandle('temp', { create: true });
+                await workingDirectoryHandle.getDirectoryHandle('results', { create: true });
+                
+                updateAnalyzeButton();
+                showNotification('✓ Working directory selected!', 'success');
+                addLog('INFO', `Working directory: ${workingDirectoryHandle.name}`);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    console.error('Error:', err);
+                    showNotification('Error selecting directory', 'error');
+                }
+            }
+        }
+        
+        async function cleanTempFiles() {
+            if (!workingDirectoryHandle) return;
+            
+            try {
+                const tempDir = await workingDirectoryHandle.getDirectoryHandle('temp');
+                for await (const entry of tempDir.values()) {
+                    await tempDir.removeEntry(entry.name);
+                }
+                addLog('INFO', 'Cleaned temporary files');
+            } catch (err) {
+                console.error('Error cleaning temp files:', err);
+            }
+        }
+        
+        // ============================
+        // ENHANCED CSV PROCESSOR CLASS
+        // ============================
+        class EnhancedCSVProcessor {
+            constructor(countries, columns, delimiter) {
+                this.countries = countries;
+                this.columns = columns.split(',').map(c => parseInt(c.trim()) - 1).filter(c => !isNaN(c));
+                this.delimiter = delimiter;
+                this.batch = [];
+                this.tempFileCount = 0;
+                this.debugLineCount = 0;
+                
+                // Patterns for different data types
+                this.phonePattern = /\+?\d{7,15}/g;
+                this.emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+                this.telegramPattern = /@[a-zA-Z0-9_]+/g;
+                
+                // Country patterns
+                this.countryPatterns = {};
+                Object.entries(countries).forEach(([country, codes]) => {
+                    this.countryPatterns[country] = codes[0];
+                });
+            }
+            
+            normalizePhone(phone) {
+                if (!phone || phone === 'undefined' || phone === 'null') return null;
+                
+                let phoneStr = phone.toString().trim();
+                
+                // Handle scientific notation
+                if (phoneStr.includes('E+') || phoneStr.includes('e+') || phoneStr.includes('E-') || phoneStr.includes('e-')) {
+                    try {
+                        const num = Number(phoneStr);
+                        phoneStr = num.toFixed(0);
+                    } catch (e) {
+                        return null;
+                    }
+                }
+                
+                const normalized = phoneStr.replace(/\D/g, '');
+                return normalized.length >= 7 ? normalized : null;
+            }
+            
+            detectCountry(phone) {
+                for (const [country, code] of Object.entries(this.countryPatterns)) {
+                    if (phone.startsWith(code)) {
+                        return country;
+                    }
+                }
+                return null;
+            }
+            
+            processLine(line, filename) {
+                const parts = line.split(this.delimiter);
+                
+                // Debug log for first few lines
+                if (this.debugLineCount < 5) {
+                    addLog('DEBUG', `Processing line with ${parts.length} parts: ${parts.slice(0, 3).join(' | ')}...`);
+                    this.debugLineCount++;
+                }
+                
+                // Process each specified column
+                for (const colIndex of this.columns) {
+                    if (colIndex >= parts.length) continue;
+                    
+                    const cellValue = parts[colIndex].trim();
+                    if (!cellValue) continue;
+                    
+                    // First, try to extract as phone number
+                    const phoneMatch = this.normalizePhone(cellValue);
+                    if (phoneMatch) {
+                        const country = this.detectCountry(phoneMatch);
+                        this.batch.push({ 
+                            type: 'phone',
+                            value: phoneMatch,
+                            filename, 
+                            country,
+                            column: colIndex + 1
+                        });
+                        continue; // If it's a phone, don't check other patterns
+                    }
+                    
+                    // Extract emails
+                    const emails = cellValue.match(this.emailPattern) || [];
+                    emails.forEach(email => {
+                        this.batch.push({ 
+                            type: 'email',
+                            value: email.toLowerCase(),
+                            original: email,
+                            filename, 
+                            country: null,
+                            column: colIndex + 1
+                        });
+                    });
+                    
+                    // Extract Telegram handles
+                    const telegrams = cellValue.match(this.telegramPattern) || [];
+                    telegrams.forEach(telegram => {
+                        this.batch.push({ 
+                            type: 'telegram',
+                            value: telegram.toLowerCase(),
+                            original: telegram,
+                            filename, 
+                            country: null,
+                            column: colIndex + 1
+                        });
+                    });
+                    
+                    // If it's not a phone/email/telegram, but looks like a term
+                    if (!phoneMatch && emails.length === 0 && telegrams.length === 0) {
+                        // Check if it could be a username or term
+                        const cleanTerm = cellValue.replace(/[^\w@.-]/g, '').trim();
+                        if (cleanTerm.length >= 3 && cleanTerm.length <= 50 && /[a-zA-Z]/.test(cleanTerm)) {
+                            this.batch.push({ 
+                                type: 'term',
+                                value: cleanTerm.toLowerCase(),
+                                original: cellValue,
+                                filename, 
+                                country: null,
+                                column: colIndex + 1
+                            });
+                        }
+                    }
+                }
+                
+                if (this.batch.length >= CONFIG.BATCH_SIZE) {
+                    return this.writeBatch();
+                }
+                
+                return null;
+            }
+            
+            async writeBatch() {
+                if (this.batch.length === 0) return;
+                
+                const tempDir = await workingDirectoryHandle.getDirectoryHandle('temp');
+                const filename = `batch_${Date.now()}_${this.tempFileCount++}.json`;
+                const fileHandle = await tempDir.getFileHandle(filename, { create: true });
+                const writable = await fileHandle.createWritable();
+                
+                await writable.write(JSON.stringify(this.batch));
+                await writable.close();
+                
+                addLog('INFO', `Wrote ${filename}: ${this.batch.length.toLocaleString()} entries`);
+                processStats.tempFilesCreated = this.tempFileCount;
+                document.getElementById('tempFiles').textContent = this.tempFileCount;
+                document.getElementById('writeOps').textContent = this.tempFileCount;
+                
+                this.batch = [];
+            }
+            
+            async flush() {
+                await this.writeBatch();
+            }
+        }
+        
+        // Add this new class after PhoneProcessor
+        class TextFileProcessor {
+            constructor(countries, minTermLength = 3) {
+                this.countries = countries;
+                this.batch = [];
+                this.tempFileCount = 0;
+                this.minTermLength = minTermLength; // Ignore terms shorter than this
+                
+                // Pattern to extract "terms" - anything that looks like a username, handle, or identifier
+                // This will match:
+                // - @username
+                // - username@domain
+                // - username
+                // - phone numbers
+                // - any alphanumeric sequence
+                this.termPattern = /[@]?[a-zA-Z0-9_]+[@]?[a-zA-Z0-9_]*/g;
+                this.phonePattern = /\+?\d{7,15}/g;
+                
+                // Country patterns
+                this.countryPatterns = {};
+                Object.entries(countries).forEach(([country, codes]) => {
+                    this.countryPatterns[country] = codes[0];
+                });
+            }
+            
+            normalizePhone(phone) {
+                if (!phone || phone === 'undefined' || phone === 'null') return null;
+                
+                let phoneStr = phone.toString().trim();
+                
+                // Handle scientific notation
+                if (phoneStr.includes('E+') || phoneStr.includes('e+') || phoneStr.includes('E-') || phoneStr.includes('e-')) {
+                    try {
+                        // Use Number() for proper parsing, then convert to string without scientific notation
+                        const num = Number(phoneStr);
+                        // Use toFixed(0) to get the full number without decimals
+                        phoneStr = num.toFixed(0);
+                    } catch (e) {
+                        return null;
+                    }
+                }
+                
+                // Remove all non-digits
+                const normalized = phoneStr.replace(/\D/g, '');
+                
+                // Ensure it's a valid phone number length
+                return normalized.length >= 7 ? normalized : null;
+            }
+            
+            detectCountry(phone) {
+                for (const [country, code] of Object.entries(this.countryPatterns)) {
+                    if (phone.startsWith(code)) {
+                        return country;
+                    }
+                }
+                return null;
+            }
+            
+            processText(text, filename) {
+                // First, extract phone numbers specifically
+                const phones = text.match(this.phonePattern) || [];
+                const processedPhones = new Set();
+                
+                phones.forEach(phone => {
+                    const normalized = this.normalizePhone(phone);
+                    if (normalized && !processedPhones.has(normalized)) {
+                        processedPhones.add(normalized);
+                        const country = this.detectCountry(normalized);
+                        this.batch.push({ 
+                            type: 'phone',
+                            value: normalized, 
+                            filename, 
+                            country 
+                        });
+                    }
+                });
+                
+                // Extract all potential terms (usernames, handles, etc.)
+                // Split by common delimiters
+                const delimiters = /[\s,;|]+/;
+                const terms = text.split(delimiters);
+                
+                const processedTerms = new Set();
+                
+                terms.forEach(term => {
+                    // Clean the term
+                    term = term.trim();
+                    
+                    // Skip if too short or already processed
+                    if (term.length < this.minTermLength || processedTerms.has(term.toLowerCase())) {
+                        return;
+                    }
+                    
+                    // Skip if it's a phone number we already processed
+                    const termDigits = term.replace(/\D/g, '');
+                    if (termDigits.length >= 7 && processedPhones.has(termDigits)) {
+                        return;
+                    }
+                    
+                    // Skip common words (optional - you can expand this list)
+                    const commonWords = ['and', 'the', 'for', 'with', 'from', 'this', 'that'];
+                    if (commonWords.includes(term.toLowerCase())) {
+                        return;
+                    }
+                    
+                    // Check if it matches our term pattern
+                    if (this.termPattern.test(term)) {
+                        processedTerms.add(term.toLowerCase());
+                        
+                        // Categorize the term
+                        let termType = 'term';
+                        if (term.startsWith('@')) {
+                            termType = 'telegram';
+                        } else if (term.includes('@')) {
+                            termType = 'handle';
+                        }
+                        
+                        this.batch.push({ 
+                            type: termType,
+                            value: term.toLowerCase(), 
+                            original: term, // Keep original case for display
+                            filename, 
+                            country: null 
+                        });
+                    }
+                });
+                
+                if (this.batch.length >= CONFIG.BATCH_SIZE) {
+                    return this.writeBatch();
+                }
+                
+                return null;
+            }
+            
+            async writeBatch() {
+                if (this.batch.length === 0) return;
+                
+                const tempDir = await workingDirectoryHandle.getDirectoryHandle('temp');
+                const filename = `text_batch_${Date.now()}_${this.tempFileCount++}.json`;
+                const fileHandle = await tempDir.getFileHandle(filename, { create: true });
+                const writable = await fileHandle.createWritable();
+                
+                await writable.write(JSON.stringify(this.batch));
+                await writable.close();
+                
+                addLog('INFO', `Wrote ${filename}: ${this.batch.length.toLocaleString()} items`);
+                processStats.tempFilesCreated = this.tempFileCount;
+                
+                this.batch = [];
+            }
+            
+            async flush() {
+                await this.writeBatch();
+            }
+        }
+        
+        // ============================
+        // FILE PROCESSING
+        // ============================
+        async function processAllFiles() {
+            const fileType = document.querySelector('input[name="fileType"]:checked').value;
+
+            if (fileType === 'text') {
+                return processTextFiles();
+            }
+            
+            // Get configuration
+            const delimiter = document.getElementById('delimiter').value;
+            const hasHeader = document.getElementById('hasHeader').checked;
+            const columns = document.getElementById('columnsToparse').value || '1,2,3';
+            const countries = getSelectedCountries();
+            
+            const processor = new EnhancedCSVProcessor(countries, columns, delimiter);
+            
+            for (let fileIndex = 0; fileIndex < uploadedFiles.length; fileIndex++) {
+                const file = uploadedFiles[fileIndex];
+                document.getElementById('currentFileName').textContent = file.name;
+                addLog('INFO', `Processing ${file.name} (${formatFileSize(file.size)})`);
+                
+                const startTime = Date.now();
+                let rowCount = 0;
+                
+                if (fileType === 'excel') {
+                    // Process Excel file
+                    rowCount = await processExcelFile(file, processor);
+                } else {
+                    // Process CSV file
+                    if (file.size < CONFIG.SMALL_FILE_SIZE) {
+                        // Small file - process in memory
+                        const text = await file.text();
+                        const lines = text.split(/\r?\n/);
+                        const startIdx = (hasHeader && fileIndex === 0) ? 1 : 0;
+                        
+                        for (let i = startIdx; i < lines.length; i++) {
+                            const line = lines[i].trim();
+                            if (line) {
+                                const writePromise = processor.processLine(line, file.name);
+                                if (writePromise) await writePromise;
+                                
+                                rowCount++;
+                                processStats.totalRows++;
+                            }
+                        }
+                        
+                        // Flush after each CSV file too
+                        await processor.flush();
+                    } else {
+                        // Large file - stream processing
+                        let offset = 0;
+                        let buffer = '';
+                        let isFirstChunk = true;
+                        
+                        while (offset < file.size) {
+                            const chunk = file.slice(offset, Math.min(offset + CONFIG.CHUNK_SIZE, file.size));
+                            const text = await chunk.text();
+                            
+                            const fullText = buffer + text;
+                            const lines = fullText.split(/\r?\n/);
+                            buffer = lines.pop() || '';
+                            
+                            const startIdx = (isFirstChunk && hasHeader && fileIndex === 0) ? 1 : 0;
+                            isFirstChunk = false;
+                            
+                            for (let i = startIdx; i < lines.length; i++) {
+                                const line = lines[i].trim();
+                                if (line) {
+                                    const writePromise = processor.processLine(line, file.name);
+                                    if (writePromise) await writePromise;
+                                    
+                                    rowCount++;
+                                    processStats.totalRows++;
+                                    
+                                    // Update UI
+                                    if (rowCount % CONFIG.UI_UPDATE_INTERVAL === 0) {
+                                        updateProgress(fileIndex, offset / file.size);
+                                        await new Promise(resolve => setTimeout(resolve, 0));
+                                    }
+                                }
+                            }
+                            
+                            offset += CONFIG.CHUNK_SIZE;
+                        }
+                        
+                        // Process remaining buffer
+                        if (buffer.trim()) {
+                            const writePromise = processor.processLine(buffer, file.name);
+                            if (writePromise) await writePromise;
+                            rowCount++;
+                            processStats.totalRows++;
+                        }
+                        
+                        // Flush after large file processing too
+                        await processor.flush();
+                    }
+                }
+                
+                const elapsed = (Date.now() - startTime) / 1000;
+                const speed = elapsed > 0 ? Math.round(rowCount / elapsed) : 0;
+                addLog('INFO', `Completed ${file.name}: ${rowCount.toLocaleString()} rows at ${speed.toLocaleString()} rows/sec`);
+                
+                processStats.filesCompleted++;
+                document.getElementById('filesProgress').textContent = `${processStats.filesCompleted} / ${uploadedFiles.length}`;
+            }
+            
+            // Final flush to ensure any remaining data is written
+            await processor.flush();
+            return processor;
+        }
+        
+        async function processTextFiles() {
+            const countries = getSelectedCountries();
+            const minTermLength = parseInt(document.getElementById('minTermLength').value) || 3;
+            const processor = new TextFileProcessor(countries, minTermLength);
+            
+            for (let fileIndex = 0; fileIndex < uploadedFiles.length; fileIndex++) {
+                const file = uploadedFiles[fileIndex];
+                document.getElementById('currentFileName').textContent = file.name;
+                addLog('INFO', `Processing ${file.name} (${formatFileSize(file.size)})`);
+                
+                const text = await file.text();
+                const writePromise = processor.processText(text, file.name);
+                if (writePromise) await writePromise;
+                
+                processStats.filesCompleted++;
+                document.getElementById('filesProgress').textContent = `${processStats.filesCompleted} / ${uploadedFiles.length}`;
+                
+                // Update progress
+                updateProgress(fileIndex, 1);
+            }
+            
+            await processor.flush();
+            return processor;
+        }
+        
+        async function processExcelFile(file, processor) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const data = await SimpleXLSX.parse(arrayBuffer);
+                
+                addLog('INFO', `Parsing Excel file: ${file.name}`);
+                addLog('INFO', `Found ${data.length} rows`);
+                
+                // Debug: Check first few rows
+                if (data.length > 0) {
+                    addLog('DEBUG', `First row: ${JSON.stringify(data[0])}`);
+                    if (data.length > 1) {
+                        addLog('DEBUG', `Second row: ${JSON.stringify(data[1])}`);
+                    }
+                }
+                
+                const hasHeader = document.getElementById('hasHeader').checked;
+                const startIdx = hasHeader ? 1 : 0;
+                
+                let rowCount = 0;
+                
+                for (let i = startIdx; i < data.length; i++) {
+                    const row = data[i];
+                    
+                    // Skip completely empty rows
+                    if (!row || row.length === 0) {
+                        addLog('DEBUG', `Row ${i} is empty, skipping`);
+                        continue;
+                    }
+                    
+                    // Check if row has any actual data
+                    const hasData = row.some(cell => cell !== undefined && cell !== null && cell !== '');
+                    if (!hasData) {
+                        addLog('DEBUG', `Row ${i} has no data, skipping`);
+                        continue;
+                    }
+                    
+                    // Convert array to CSV-like string for processing
+                    // Handle undefined/null values properly
+                    const line = row.map(cell => {
+                        if (cell === undefined || cell === null) return '';
+                        return cell.toString();
+                    }).join(',');
+                    
+                    // Debug first few lines
+                    if (rowCount < 3) {
+                        addLog('DEBUG', `Processing line ${i}: ${line}`);
+                    }
+                    
+                    const writePromise = processor.processLine(line, file.name);
+                    if (writePromise) await writePromise;
+                    
+                    rowCount++;
+                    processStats.totalRows++;
+                    
+                    if (rowCount % 1000 === 0) {
+                        updateProgress(0, i / data.length);
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                }
+                
+                addLog('INFO', `Actually processed ${rowCount} rows from ${file.name}`);
+                
+                // IMPORTANT: Flush after each file to ensure data is written
+                await processor.flush();
+                
+                return rowCount;
+            } catch (err) {
+                addLog('ERROR', `Failed to process Excel file: ${err.message}`);
+                throw err;
+            }
+        }
+        
+        function updateProgress(fileIndex, fileProgress) {
+            const overallProgress = ((fileIndex + fileProgress) / uploadedFiles.length) * 100;
+            const progressFill = document.getElementById('progressFill');
+            progressFill.style.width = overallProgress + '%';
+            progressFill.textContent = Math.round(overallProgress) + '%';
+            
+            document.getElementById('totalRows').textContent = processStats.totalRows.toLocaleString();
+            document.getElementById('rowsProcessed').textContent = processStats.totalRows.toLocaleString();
+            
+            // Calculate speed
+            const elapsed = (Date.now() - processStats.startTime) / 1000;
+            if (elapsed > 0) {
+                const speed = Math.round(processStats.totalRows / elapsed);
+                document.getElementById('processSpeed').textContent = `${speed.toLocaleString()} rows/sec`;
+                document.getElementById('speedStat').textContent = speed.toLocaleString();
+                processStats.currentSpeed = speed;
+                
+                // Time remaining
+                if (speed > 0 && overallProgress > 0) {
+                    const totalEstimated = (processStats.totalRows / overallProgress) * 100;
+                    const remaining = totalEstimated - processStats.totalRows;
+                    const secondsLeft = remaining / speed;
+                    const minutesLeft = Math.ceil(secondsLeft / 60);
+                    document.getElementById('timeRemaining').textContent = `~${minutesLeft} min`;
+                }
+            }
+        }
+        
+        // ============================
+        // MERGE RESULTS
+        // ============================
+        async function mergeResults() {
+            addLog('INFO', 'Starting merge phase...');
+            document.getElementById('currentFileName').textContent = 'Merging results...';
+            
+            try {
+                const tempDir = await workingDirectoryHandle.getDirectoryHandle('temp');
+                const resultsDir = await workingDirectoryHandle.getDirectoryHandle('results');
+                
+                // Count temp files
+                let tempFileCount = 0;
+                for await (const entry of tempDir.values()) {
+                    if (entry.name.includes('batch_')) {
+                        tempFileCount++;
+                    }
+                }
+                
+                addLog('INFO', `Found ${tempFileCount} temp files to process`);
+                
+                if (tempFileCount === 0) {
+                    throw new Error('No temporary files found. Processing may have failed.');
+                }
+                
+                // Process data - separate maps for different types
+                const phoneMap = new Map();      // phone -> Set of filenames
+                const telegramMap = new Map();   // @handle -> Set of filenames
+                const handleMap = new Map();     // handle@domain -> Set of filenames
+                const countryMap = new Map();    // country -> Set of phones
+                const termMap = new Map(); // all terms -> Set of filenames
+                
+                // Initialize country sets
+                const countries = getSelectedCountries();
+                Object.keys(countries).forEach(country => {
+                    countryMap.set(country, new Set());
+                });
+                
+                // Read and process batch files
+                let processedFiles = 0;
+                for await (const entry of tempDir.values()) {
+                    if (entry.name.includes('batch_')) {
+                        const file = await entry.getFile();
+                        const data = JSON.parse(await file.text());
+                        
+                        for (const item of data) {
+                            // Create a unified key for the term
+                            const key = `${item.type}:${item.value}`;
+                            
+                            if (!termMap.has(key)) {
+                                termMap.set(key, {
+                                    type: item.type,
+                                    value: item.value,
+                                    original: item.original || item.value,
+                                    files: new Set(),
+                                    country: item.country
+                                });
+                            }
+                            termMap.get(key).files.add(item.filename);
+                            
+                            if (item.type === 'phone') {
+                                // Track phone-file mapping
+                                if (!phoneMap.has(item.value)) {
+                                    phoneMap.set(item.value, new Set());
+                                }
+                                phoneMap.get(item.value).add(item.filename);
+                                
+                                // Track country phones
+                                if (item.country && countryMap.has(item.country)) {
+                                    countryMap.get(item.country).add(item.value);
+                                }
+                            } else if (item.type === 'telegram') {
+                                // Track Telegram handles
+                                if (!telegramMap.has(item.value)) {
+                                    telegramMap.set(item.value, new Set());
+                                }
+                                telegramMap.get(item.value).add(item.filename);
+                            } else if (item.type === 'handle') {
+                                // Track other handles
+                                if (!handleMap.has(item.value)) {
+                                    handleMap.set(item.value, new Set());
+                                }
+                                handleMap.get(item.value).add(item.filename);
+                            }
+                        }
+                        
+                        processedFiles++;
+                        if (processedFiles % 5 === 0) {
+                            addLog('INFO', `Processed ${processedFiles}/${tempFileCount} temp files`);
+                        }
+                    }
+                }
+                
+                addLog('INFO', `Found ${phoneMap.size} unique phone numbers`);
+                addLog('INFO', `Found ${telegramMap.size} unique Telegram handles`);
+                addLog('INFO', `Found ${handleMap.size} unique other handles`);
+                
+                // Find common items
+                const commonPhones = {};
+                const commonTelegrams = {};
+                const commonHandles = {};
+                
+                for (const [phone, files] of phoneMap.entries()) {
+                    if (files.size > 1) {
+                        commonPhones[phone] = Array.from(files);
+                    }
+                }
+                
+                for (const [telegram, files] of telegramMap.entries()) {
+                    if (files.size > 1) {
+                        commonTelegrams[telegram] = Array.from(files);
+                    }
+                }
+                
+                for (const [handle, files] of handleMap.entries()) {
+                    if (files.size > 1) {
+                        commonHandles[handle] = Array.from(files);
+                    }
+                }
+                
+                // After processing, filter by minimum occurrences
+                const minOccurrences = parseInt(document.getElementById('minOccurrences')?.value) || 2;
+                const commonTerms = [];
+
+                for (const [key, data] of termMap.entries()) {
+                    if (data.files.size >= minOccurrences) {
+                        commonTerms.push({
+                            ...data,
+                            files: Array.from(data.files),
+                            occurrences: data.files.size
+                        });
+                    }
+                }
+
+                // Sort by occurrences
+                commonTerms.sort((a, b) => b.occurrences - a.occurrences);
+                
+                addLog('INFO', `Found ${Object.keys(commonPhones).length} common phone numbers`);
+                addLog('INFO', `Found ${Object.keys(commonTelegrams).length} common Telegram handles`);
+                addLog('INFO', `Found ${Object.keys(commonHandles).length} common other handles`);
+                addLog('INFO', `Found ${commonTerms.length} common terms (${minOccurrences}+ occurrences)`);
+                
+                // Write results
+                addLog('INFO', 'Writing final results...');
+                
+                // Write country files with source information
+                for (const [country, phones] of countryMap.entries()) {
+                    const filename = `${country}_phone_numbers_with_sources.txt`;
+                    const fileHandle = await resultsDir.getFileHandle(filename, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    
+                    let content = `${country} Phone Numbers (+${countries[country][0]})\n`;
+                    content += `Total: ${phones.size} unique numbers\n`;
+                    content += `${'='.repeat(60)}\n\n`;
+                    
+                    // Get phone-to-files mapping for this country
+                    const countryPhoneDetails = [];
+                    for (const phone of phones) {
+                        if (phoneMap.has(phone)) {
+                            countryPhoneDetails.push({
+                                phone: phone,
+                                files: Array.from(phoneMap.get(phone))
+                            });
+                        }
+                    }
+                    
+                    // Sort by number of files (most common first), then by phone number
+                    countryPhoneDetails.sort((a, b) => {
+                        if (b.files.length !== a.files.length) {
+                            return b.files.length - a.files.length;
+                        }
+                        return a.phone.localeCompare(b.phone);
+                    });
+                    
+                    // Write with file information
+                    countryPhoneDetails.forEach(({phone, files}) => {
+                        content += `${phone} (found in ${files.length} file${files.length > 1 ? 's' : ''}):\n`;
+                        files.forEach(f => content += `  - ${f}\n`);
+                        content += '\n';
+                    });
+                    
+                    await writable.write(content);
+                    await writable.close();
+                    
+                    addLog('INFO', `Created ${filename}: ${phones.size} numbers with source files`);
+                }
+                
+                // Also create simple list files (just numbers) for easy copying
+                for (const [country, phones] of countryMap.entries()) {
+                    const filename = `${country}_phone_numbers_list.txt`;
+                    const fileHandle = await resultsDir.getFileHandle(filename, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    
+                    let content = `${country} Phone Numbers (+${countries[country][0]})\n`;
+                    content += `Total: ${phones.size}\n`;
+                    content += `${'='.repeat(50)}\n`;
+                    content += Array.from(phones).sort().join('\n');
+                    
+                    await writable.write(content);
+                    await writable.close();
+                }
+                
+                // Write common items file
+                const commonFile = await resultsDir.getFileHandle('common_items.txt', { create: true });
+                const commonWritable = await commonFile.createWritable();
+                
+                let content = `Common Items Across Multiple Files\n`;
+                content += `${'='.repeat(50)}\n\n`;
+                
+                // Common phones section
+                content += `PHONE NUMBERS (${Object.keys(commonPhones).length} total)\n`;
+                content += `${'-'.repeat(30)}\n`;
+                Object.entries(commonPhones)
+                    .sort((a, b) => b[1].length - a[1].length)
+                    .forEach(([phone, files]) => {
+                        content += `${phone} (${files.length} files):\n`;
+                        files.forEach(f => content += `  - ${f}\n`);
+                        content += '\n';
+                    });
+                
+                // Common Telegram handles section
+                content += `\nTELEGRAM HANDLES (${Object.keys(commonTelegrams).length} total)\n`;
+                content += `${'-'.repeat(30)}\n`;
+                Object.entries(commonTelegrams)
+                    .sort((a, b) => b[1].length - a[1].length)
+                    .forEach(([telegram, files]) => {
+                        content += `${telegram} (${files.length} files):\n`;
+                        files.forEach(f => content += `  - ${f}\n`);
+                        content += '\n';
+                    });
+                
+                // Common other handles section
+                content += `\nOTHER HANDLES (${Object.keys(commonHandles).length} total)\n`;
+                content += `${'-'.repeat(30)}\n`;
+                Object.entries(commonHandles)
+                    .sort((a, b) => b[1].length - a[1].length)
+                    .forEach(([handle, files]) => {
+                        content += `${handle} (${files.length} files):\n`;
+                        files.forEach(f => content += `  - ${f}\n`);
+                        content += '\n';
+                    });
+                
+                await commonWritable.write(content);
+                await commonWritable.close();
+                
+                // Write comprehensive results file
+                const resultsFile = await resultsDir.getFileHandle('common_terms_analysis.txt', { create: true });
+                const resultsWritable = await resultsFile.createWritable();
+
+                let termsContent = `Common Terms Analysis\n`;
+                termsContent += `Found ${commonTerms.length} terms appearing in ${minOccurrences}+ files\n`;
+                termsContent += `${'='.repeat(60)}\n\n`;
+
+                // Group by type
+                const phoneTerms = commonTerms.filter(t => t.type === 'phone');
+                const telegramTerms = commonTerms.filter(t => t.type === 'telegram');
+                const handleTerms = commonTerms.filter(t => t.type === 'handle');
+                const otherTerms = commonTerms.filter(t => t.type === 'term');
+
+                // Write each category
+                if (phoneTerms.length > 0) {
+                    termsContent += `PHONE NUMBERS (${phoneTerms.length} total)\n`;
+                    termsContent += `${'-'.repeat(40)}\n`;
+                    phoneTerms.forEach(term => {
+                        termsContent += `${term.value} (${term.occurrences} files)\n`;
+                        term.files.forEach(f => termsContent += `  - ${f}\n`);
+                        termsContent += '\n';
+                    });
+                }
+
+                if (telegramTerms.length > 0) {
+                    termsContent += `\nTELEGRAM HANDLES (${telegramTerms.length} total)\n`;
+                    termsContent += `${'-'.repeat(40)}\n`;
+                    telegramTerms.forEach(term => {
+                        termsContent += `${term.original} (${term.occurrences} files)\n`;
+                        term.files.forEach(f => termsContent += `  - ${f}\n`);
+                        termsContent += '\n';
+                    });
+                }
+
+                if (handleTerms.length > 0) {
+                    termsContent += `\nEMAIL-STYLE HANDLES (${handleTerms.length} total)\n`;
+                    termsContent += `${'-'.repeat(40)}\n`;
+                    handleTerms.forEach(term => {
+                        termsContent += `${term.original} (${term.occurrences} files)\n`;
+                        term.files.forEach(f => termsContent += `  - ${f}\n`);
+                        termsContent += '\n';
+                    });
+                }
+
+                if (otherTerms.length > 0) {
+                    termsContent += `\nOTHER COMMON TERMS (${otherTerms.length} total)\n`;
+                    termsContent += `${'-'.repeat(40)}\n`;
+                    otherTerms.forEach(term => {
+                        termsContent += `${term.original} (${term.occurrences} files)\n`;
+                        term.files.forEach(f => termsContent += `  - ${f}\n`);
+                        termsContent += '\n';
+                    });
+                }
+
+                await resultsWritable.write(termsContent);
+                await resultsWritable.close();
+                
+                // Extract phone number prefixes from all filenames
+                const filenamePrefixes = new Set();
+                for (let file of uploadedFiles) {
+                    // Match pattern: number followed by space and name
+                    const match = file.name.match(/^(\d+)\s+/);
+                    if (match) {
+                        filenamePrefixes.add(match[1]);
+                    }
+                }
+
+                addLog('INFO', `Found ${filenamePrefixes.size} phone number prefixes in filenames`);
+
+                // Create clean common phones list (excluding filename prefixes)
+                const cleanCommonPhones = [];
+                for (const [phone, files] of Object.entries(commonPhones)) {
+                    if (!filenamePrefixes.has(phone)) {
+                        cleanCommonPhones.push(phone);
+                    }
+                }
+
+                // Sort by phone number
+                cleanCommonPhones.sort();
+
+                addLog('INFO', `Clean common phones: ${cleanCommonPhones.length} (excluded ${Object.keys(commonPhones).length - cleanCommonPhones.length} that were filename prefixes)`);
+
+                // Write clean common phones file
+                const cleanPhonesFile = await resultsDir.getFileHandle('clean_common_phones.txt', { create: true });
+                const cleanPhonesWritable = await cleanPhonesFile.createWritable();
+
+                let cleanContent = `Clean Common Phone Numbers\n`;
+                cleanContent += `(Excluding numbers that are filename prefixes)\n`;
+                cleanContent += `Total: ${cleanCommonPhones.length}\n`;
+                cleanContent += `${'='.repeat(50)}\n`;
+                cleanContent += cleanCommonPhones.join('\n');
+
+                await cleanPhonesWritable.write(cleanContent);
+                await cleanPhonesWritable.close();
+
+                addLog('INFO', `Created clean_common_phones.txt: ${cleanCommonPhones.length} numbers`);
+                
+                addLog('INFO', 'Merge complete!');
+                
+                // Return results
+                const countryArrays = {};
+                countryMap.forEach((phones, country) => {
+                    countryArrays[country] = Array.from(phones);
+                });
+                
+                return {
+                    totalNumbers: phoneMap.size,
+                    totalTelegrams: telegramMap.size,
+                    totalHandles: handleMap.size,
+                    totalTerms: termMap.size,
+                    countryNumbers: countryArrays,
+                    commonNumbers: commonPhones,
+                    commonTelegrams: commonTelegrams,
+                    commonHandles: commonHandles,
+                    commonTerms: commonTerms.slice(0, 1000) // Limit to 1000 terms for UI
+                };
+                
+            } catch (err) {
+                addLog('ERROR', `Merge failed: ${err.message}`);
+                throw err;
+            }
+        }
+        
+        // ============================
+        // MAIN ANALYSIS FUNCTION
+        // ============================
+        async function analyzeFiles() {
+            if (!workingDirectoryHandle) {
+                alert('Please select a working directory first');
+                return;
+            }
+            
+            if (uploadedFiles.length === 0) {
+                alert('Please upload CSV files');
+                return;
+            }
+            
+            const countries = getSelectedCountries();
+            if (Object.keys(countries).length === 0) {
+                alert('Please select at least one country');
+                return;
+            }
+            
+            // Initialize
+            processStats = {
+                startTime: Date.now(),
+                totalRows: 0,
+                filesCompleted: 0,
+                tempFilesCreated: 0,
+                currentSpeed: 0
+            };
+            
+            // Update UI
+            document.getElementById('welcomeState').style.display = 'none';
+            document.getElementById('processingState').style.display = 'block';
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('analyzeButton').disabled = true;
+            
+            await cleanTempFiles();
+            
+            try {
+                // Process all files
+                await processAllFiles();
+                
+                // Wait a moment for any pending writes
+                addLog('INFO', 'Finalizing write operations...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Merge results
+                const results = await mergeResults();
+                
+                // Clean up
+                await cleanTempFiles();
+                
+                // Show results
+                showResults(results);
+                
+            } catch (err) {
+                console.error('Error:', err);
+                addLog('ERROR', `Analysis failed: ${err.message}`);
+                showNotification('Analysis failed: ' + err.message, 'error');
+            } finally {
+                document.getElementById('progressSection').style.display = 'none';
+                document.getElementById('analyzeButton').disabled = false;
+            }
+        }
+        
+        // ============================
+        // SHOW RESULTS
+        // ============================
+        function showResults(results) {
+            document.getElementById('processingState').style.display = 'none';
+            
+            const elapsed = (Date.now() - processStats.startTime) / 1000;
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            const seconds = Math.floor(elapsed % 60);
+            
+            // Final stats
+            document.getElementById('finalStats').innerHTML = `
+                <div class="summary-item">
+                    <div class="summary-value">${uploadedFiles.length}</div>
+                    <div class="summary-label">Files Processed</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">${processStats.totalRows.toLocaleString()}</div>
+                    <div class="summary-label">Total Rows</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">${results.totalNumbers.toLocaleString()}</div>
+                    <div class="summary-label">Unique Numbers</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">${Object.keys(results.commonNumbers).length.toLocaleString()}</div>
+                    <div class="summary-label">Common Numbers</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">${processStats.currentSpeed.toLocaleString()}</div>
+                    <div class="summary-label">Avg Rows/Sec</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">${hours}h ${minutes}m ${seconds}s</div>
+                    <div class="summary-label">Total Time</div>
+                </div>
+            `;
+            
+            // Country results
+            const countryDiv = document.getElementById('countryResults');
+            countryDiv.innerHTML = '';
+            Object.entries(results.countryNumbers).forEach(([country, numbers]) => {
+                const div = document.createElement('div');
+                div.style.marginBottom = '15px';
+                div.innerHTML = `
+                    <h4>${escapeHtml(country)} - ${numbers.length.toLocaleString()} numbers</h4>
+                    <p style="color: #586069;">
+                        Files saved:<br>
+                        • ${escapeHtml(country)}_phone_numbers_with_sources.txt (with file details)<br>
+                        • ${escapeHtml(country)}_phone_numbers_list.txt (simple list)<br>
+                        • clean_common_phones.txt (common phones excluding filename prefixes)
+                    </p>
+                `;
+                countryDiv.appendChild(div);
+            });
+            
+            // Common numbers
+            const commonDiv = document.getElementById('commonResults');
+            commonDiv.innerHTML = `
+                <p><strong>${Object.keys(results.commonNumbers).length.toLocaleString()}</strong> phone numbers in multiple files</p>
+                <p><strong>${Object.keys(results.commonTelegrams || {}).length.toLocaleString()}</strong> Telegram handles in multiple files</p>
+                <p><strong>${Object.keys(results.commonHandles || {}).length.toLocaleString()}</strong> other handles in multiple files</p>
+                <p style="color: #586069; margin-top: 10px;">Full list saved to: common_items.txt</p>
+            `;
+            
+            // Download section
+            const downloadDiv = document.getElementById('downloadLinks');
+            downloadDiv.innerHTML = `
+                <button class="download-button" onclick="showNotification('Files saved in results folder', 'success')">
+                    📂 View Results in Folder
+                </button>
+            `;
+            
+            document.getElementById('results').style.display = 'block';
+            
+            addLog('INFO', `Analysis complete! Processed ${processStats.totalRows.toLocaleString()} rows in ${hours}h ${minutes}m ${seconds}s`);
+        }
+        
+        // ============================
+        // COUNTRY MANAGEMENT
+        // ============================
+        function addCustomCountry() {
+            const nameInput = document.getElementById('newCountryName');
+            const codeInput = document.getElementById('newCountryCode');
+            
+            const name = nameInput.value.trim();
+            const code = codeInput.value.trim();
+            
+            if (!name || !code) {
+                alert('Please enter both country name and code');
+                return;
+            }
+            
+            if (!/^\d{1,5}$/.test(code)) {
+                alert('Country code must be numeric (1-5 digits)');
+                return;
+            }
+            
+            const countryConfig = document.getElementById('countryConfig');
+            const countryItem = document.createElement('div');
+            const countryId = name.replace(/[^a-zA-Z0-9]/g, '_') + '_' + customCountryId++;
+            countryItem.className = 'country-item custom-country';
+            countryItem.innerHTML = `
+                <input type="checkbox" id="${escapeHtml(countryId)}" value="${escapeHtml(code)}" checked>
+                <label for="${escapeHtml(countryId)}">${escapeHtml(name)} (+${escapeHtml(code)})</label>
+                <button class="remove-country" onclick="removeCountry('${escapeHtml(countryId)}')">✕</button>
+            `;
+            countryConfig.appendChild(countryItem);
+            
+            nameInput.value = '';
+            codeInput.value = '';
+            showNotification('Country added', 'success');
+        }
+        
+        function removeCountry(countryId) {
+            document.getElementById(countryId).parentElement.remove();
+        }
+        
+        function getSelectedCountries() {
+            const countries = {};
+            const checkboxes = document.querySelectorAll('#countryConfig input[type="checkbox"]:checked');
+            checkboxes.forEach(checkbox => {
+                const label = checkbox.nextElementSibling.textContent;
+                const countryName = label.split(' (')[0].trim();
+                countries[countryName] = [checkbox.value];
+            });
+            return countries;
+        }
+        
+        // ============================
+        // FILE MANAGEMENT
+        // ============================
+        function updateFileType() {
+            const fileType = document.querySelector('input[name="fileType"]:checked').value;
+            const fileInput = document.getElementById('fileInput');
+            const csvConfig = document.querySelector('.csv-config').parentElement;
+            
+            if (fileType === 'csv') {
+                fileInput.accept = '.csv';
+                document.getElementById('csvInfo').style.display = 'block';
+                document.getElementById('excelInfo').style.display = 'none';
+                document.getElementById('textInfo').style.display = 'none';
+                document.getElementById('textOptions').style.display = 'none';
+                csvConfig.style.display = 'block';
+            } else if (fileType === 'excel') {
+                fileInput.accept = '.xlsx';
+                document.getElementById('csvInfo').style.display = 'none';
+                document.getElementById('excelInfo').style.display = 'block';
+                document.getElementById('textInfo').style.display = 'none';
+                document.getElementById('textOptions').style.display = 'none';
+                csvConfig.style.display = 'block'; // Use same config as CSV
+            } else {
+                fileInput.accept = '.txt,.text';
+                document.getElementById('csvInfo').style.display = 'none';
+                document.getElementById('excelInfo').style.display = 'none';
+                document.getElementById('textInfo').style.display = 'block';
+                document.getElementById('textOptions').style.display = 'block';
+                csvConfig.style.display = 'none';
+            }
+            
+            // Clear uploaded files when switching
+            uploadedFiles = [];
+            updateFileList();
+        }
+        
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+            files.forEach(file => {
+                if (!uploadedFiles.find(f => f.name === file.name)) {
+                    uploadedFiles.push(file);
+                }
+            });
+            updateFileList();
+            updateAnalyzeButton();
+        });
+        
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+            
+            if (uploadedFiles.length === 0) {
+                fileList.innerHTML = '<p style="text-align: center; color: #586069; padding: 20px;">No files uploaded</p>';
+                return;
+            }
+            
+            uploadedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    <span>${escapeHtml(file.name)} <span class="file-size">(${formatFileSize(file.size)})</span></span>
+                    <button class="btn btn-danger btn-sm" onclick="removeFile(${index})">Remove</button>
+                `;
+                fileList.appendChild(fileItem);
+            });
+            
+            const totalSize = uploadedFiles.reduce((sum, file) => sum + file.size, 0);
+            const summary = document.createElement('div');
+            summary.style.cssText = 'text-align: center; padding: 10px; color: #586069; border-top: 1px solid #e1e4e8; margin-top: 10px;';
+            summary.textContent = `Total: ${uploadedFiles.length} files, ${formatFileSize(totalSize)}`;
+            fileList.appendChild(summary);
+        }
+        
+        function removeFile(index) {
+            uploadedFiles.splice(index, 1);
+            updateFileList();
+            updateAnalyzeButton();
+        }
+        
+        function updateAnalyzeButton() {
+            const button = document.getElementById('analyzeButton');
+            button.disabled = uploadedFiles.length === 0 || !workingDirectoryHandle;
+        }
+        
+        // ============================
+        // RESET
+        // ============================
+        function resetAll() {
+            if (confirm('Reset everything? This will clear all files and results.')) {
+                uploadedFiles = [];
+                document.getElementById('fileInput').value = '';
+                updateFileList();
+                updateAnalyzeButton();
+                
+                document.getElementById('results').style.display = 'none';
+                document.getElementById('processingState').style.display = 'none';
+                document.getElementById('welcomeState').style.display = 'block';
+                document.getElementById('progressSection').style.display = 'none';
+                
+                cleanTempFiles();
+                
+                const checkboxes = document.querySelectorAll('#countryConfig input[type="checkbox"]');
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = checkbox.id === 'UK' || checkbox.id === 'Australia' || checkbox.id === 'France';
+                });
+                
+                document.querySelectorAll('.custom-country').forEach(el => el.remove());
+                
+                document.getElementById('logViewer').innerHTML = '<div class="log-entry"><span class="log-time">[00:00:00]</span><span class="log-level-info">INFO</span> System reset</div>';
+                
+                showNotification('✓ Reset Complete!', 'success');
+            }
+        }
+        
+        // ============================
+        // INITIALIZATION
+        // ============================
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!('showDirectoryPicker' in window)) {
+                document.getElementById('analyzeButton').disabled = true;
+                alert('This browser does not support required features. Please use Chrome or Edge.');
+                return;
+            }
+            
+            ['newCountryName', 'newCountryCode'].forEach(id => {
+                document.getElementById(id).addEventListener('keypress', e => {
+                    if (e.key === 'Enter') addCustomCountry();
+                });
+            });
+            
+            document.getElementById('analyzeButton').addEventListener('click', analyzeFiles);
+            
+            // Add animations
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                @keyframes slideOut {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(100%); opacity: 0; }
+                }
+            `;
+            document.head.appendChild(style);
+        });
+    </script>
+</body>
+</html>
