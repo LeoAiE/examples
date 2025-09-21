@@ -1,0 +1,295 @@
+blog_data_db.txt - Blog and reputation data database
+
+BLOG_POST_001
+Date: 2024-02-15
+Source: LinkedIn
+Content: "John Smith is a senior business consultant at Global Consulting Inc. He specializes in international business development with focus on UK and Asian markets. Recently closed major deal with Tokyo partners."
+
+BLOG_POST_002
+Date: 2024-03-01
+Source: Company Website
+Content: "Maria Garcia joins John Smith's team as International Relations Manager. They will be working together on expanding operations in Europe and Asia."
+
+SOCIAL_MEDIA_001
+Platform: Twitter
+Username: @robertj_business
+Date: 2024-03-14
+Content: "Excited to join John Smith and Maria Garcia for the London conference next week. Great opportunity for networking!"
+
+NEWS_ARTICLE_001
+Date: 2024-03-20
+Source: Business Daily
+Title: "Global Consulting Expands UK Operations"
+Content: "John Smith, along with his team including Maria Garcia and Robert Johnson, successfully established new partnerships in London. The team is known for their ethical business practices and strong client relationships."
+
+FORUM_POST_001
+Date: 2024-01-10
+Source: Business Forum
+Author: Anonymous
+Content: "John Smith (+1-555-0123) is highly recommended for international consulting. Very professional and trustworthy. No negative records or complaints."
+
+
+
+leos.json - LEO (intelligence cards) storage file
+
+{
+  "leo_b31bd11d": {
+    "id": "leo_b31bd11d",
+    "name": "John Smith Investigation",
+    "description": "Monitor all activities for John Smith",
+    "target_identifiers": {
+      "name": "John Smith",
+      "phone": "+1-555-0123"
+    },
+    "selected_agents": [
+      "travel",
+      "telecom"
+    ],
+    "schedule": "daily_7am",
+    "created_at": "2025-09-20T13:16:26.522674",
+    "last_run": "2025-09-20T16:19:02.686671",
+    "status": "active",
+    "results": [
+      {
+        "leo_id": "leo_b31bd11d",
+        "timestamp": "2025-09-20T13:16:26.523672",
+        "agent_results": {
+          "travel": "### Travel Records for John Smith\n\n#### Personal Information\n- **Name:** John Smith\n- **Passport:** US123456789\n- **Phone:** +1-555-0123\n\n#### Travel History\n1. **Trip 1**\n   - **Travel Date:** March 15, 2024\n   - **Destination:** London, UK\n   - **Return Date:** March 22, 2024\n   - **Flight:** BA 285\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n     - Robert Johnson (+1-555-0125)\n\n2. **Trip 2**\n   - **Travel Date:** May 10, 2024\n   - **Destination:** Tokyo, Japan\n   - **Return Date:** May 20, 2024\n   - **Flight:** ANA 109\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n\n3. **Trip 3**\n   - **Travel Date:** July 1, 2024\n   - **Destination:** Paris, France\n   - **Return Date:** July 8, 2024\n   - **Flight:** AF 023\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n     - Sarah Wilson (+1-555-0126)\n\n#### Frequent Travel Companions\n- **Maria Garcia**: Co-traveled with John Smith on 3 occasions (London, Tokyo, Paris).\n\n#### Travel Patterns\n- John Smith has a consistent travel pattern of traveling with Maria Garcia on multiple trips.\n- The destinations include major cities: London, Tokyo, and Paris, indicating a preference for international travel.\n\n#### Summary\nJohn Smith has taken three trips in 2024, all with varying co-travelers, but consistently traveling with Maria Garcia. There are no suspicious activities noted in the travel records.",
+          "telecom": "### Communication Analysis for John Smith (+1-555-0123)\n\n#### Call History\n1. **Call Log 001**\n   - **Called:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 14:30\n   - **Duration:** 5 min\n   - **Type:** Voice Call\n\n2. **Call Log 002**\n   - **Called:** +1-555-0125\n   - **Date:** 2024-03-14\n   - **Time:** 15:45\n   - **Duration:** 12 min\n   - **Type:** Voice Call\n\n3. **Call Log 003**\n   - **Called:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 16:00\n   - **Duration:** 3 min\n   - **Type:** Voice Call\n\n4. **Call Log 004**\n   - **Called:** +1-555-0789\n   - **Date:** 2024-03-13\n   - **Time:** 10:00\n   - **Duration:** 25 min\n   - **Type:** Voice Call\n   - **Note:** Frequent contact - 15 calls this month\n\n5. **Call Log 005**\n   - **Called:** +44-20-1234-5678\n   - **Date:** 2024-03-20\n   - **Time:** 18:00\n   - **Duration:** 8 min\n   - **Type:** International Call\n   - **Location:** Called from London, UK\n\n#### SMS Logs\n1. **SMS Log 001**\n   - **To:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 09:30\n   - **Type:** SMS\n   - **Message:** \"Meeting confirmed for tomorrow's flight\"\n\n#### Communication Patterns\n- **Frequency of Calls:**\n  - Total Calls Made: 5 (including international)\n  - Frequent Contact: +1-555-0789 (15 calls in March)\n  \n- **Time of Day Patterns:**\n  - Most calls on March 14 occurred in the afternoon (14:30, 15:45, 16:00).\n  - The SMS was sent in the morning (09:30).\n\n#### International Calls\n- **International Call:**\n  - **Number:** +44-20-1234-5678\n  - **Date:** 2024-03-20\n  - **Time:** 18:00\n  - **Duration:** 8 min\n  - **Location:** Called from London, UK\n\n#### Suspicious Patterns\n- No unusual calling patterns or suspicious activities detected in the provided data.\n\n### Summary\nJohn Smith has a total of 5 calls logged, with a notable frequent contact (+1-555-0789) and an international call to the UK. Communication primarily occurs in the afternoon, with an SMS sent in the morning confirming a meeting. No suspicious activities were identified in the logs."
+        },
+        "summary": ""
+      }
+    ],
+    "last_results": {
+      "leo_id": "leo_b31bd11d",
+      "leo_name": "John Smith Investigation",
+      "timestamp": "2025-09-20T16:18:45.031540",
+      "target": {
+        "name": "John Smith",
+        "phone": "+1-555-0123"
+      },
+      "agent_results": {
+        "travel": "### Travel Information for John Smith\n\n#### Personal Details:\n- **Name:** John Smith\n- **Passport:** US123456789\n- **Phone:** +1-555-0123\n\n#### Travel History:\n1. **Trip 1:**\n   - **Travel Date:** March 15, 2024\n   - **Destination:** London, UK\n   - **Return Date:** March 22, 2024\n   - **Flight:** BA 285\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n     - Robert Johnson (+1-555-0125)\n\n2. **Trip 2:**\n   - **Travel Date:** May 10, 2024\n   - **Destination:** Tokyo, Japan\n   - **Return Date:** May 20, 2024\n   - **Flight:** ANA 109\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n\n3. **Trip 3:**\n   - **Travel Date:** July 1, 2024\n   - **Destination:** Paris, France\n   - **Return Date:** July 8, 2024\n   - **Flight:** AF 023\n   - **Co-travelers:** \n     - Maria Garcia (+1-555-0124)\n     - Sarah Wilson (+1-555-0126)\n\n#### Frequent Travel Companions:\n- **Maria Garcia** (3 trips together: London, Tokyo, Paris)\n\n#### Travel Patterns:\n- John Smith frequently travels with Maria Garcia, indicating a strong travel partnership.\n- All trips listed are international, suggesting a pattern of traveling to major global cities.\n\n#### Summary:\nJohn Smith has taken three trips in 2024, all with significant co-travelers, especially with Maria Garcia, who is his frequent travel companion. No suspicious activities were noted in the travel records.",
+        "telecom": "### Communication Analysis for John Smith (+1-555-0123)\n\n#### Call History\n1. **CALL_LOG_001**\n   - **Called:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 14:30\n   - **Duration:** 5 min\n   - **Type:** Voice Call\n\n2. **CALL_LOG_002**\n   - **Called:** +1-555-0125\n   - **Date:** 2024-03-14\n   - **Time:** 15:45\n   - **Duration:** 12 min\n   - **Type:** Voice Call\n\n3. **CALL_LOG_003**\n   - **Called:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 16:00\n   - **Duration:** 3 min\n   - **Type:** Voice Call\n\n4. **CALL_LOG_004**\n   - **Called:** +1-555-0789\n   - **Date:** 2024-03-13\n   - **Time:** 10:00\n   - **Duration:** 25 min\n   - **Type:** Voice Call\n   - **Note:** Frequent contact - 15 calls this month\n\n5. **CALL_LOG_005**\n   - **Called:** +44-20-1234-5678\n   - **Date:** 2024-03-20\n   - **Time:** 18:00\n   - **Duration:** 8 min\n   - **Type:** International Call\n   - **Location:** Called from London, UK\n\n#### SMS Logs\n1. **SMS_LOG_001**\n   - **To:** +1-555-0124\n   - **Date:** 2024-03-14\n   - **Time:** 09:30\n   - **Type:** SMS\n   - **Message:** \"Meeting confirmed for tomorrow's flight\"\n\n#### Top Contacts by Frequency\n- **+1-555-0124**\n  - Total Calls: 2 (both on 2024-03-14)\n- **+1-555-0789**\n  - Total Calls: 1 (on 2024-03-13)\n- **+1-555-0125**\n  - Total Calls: 1 (on 2024-03-14)\n- **+44-20-1234-5678**\n  - Total Calls: 1 (on 2024-03-20)\n\n#### Communication Patterns\n- **Time of Day:**\n  - Most calls occurred in the afternoon (14:30 and 15:45 on 2024-03-14).\n  - One call occurred in the morning (10:00 on 2024-03-13).\n  - The international call was made in the evening (18:00 on 2024-03-20).\n\n- **Frequency:**\n  - A total of 5 voice calls and 1 SMS were recorded in the provided logs.\n\n#### International Calls\n- **International Call:**\n  - **Number Called:** +44-20-1234-5678\n  - **Date:** 2024-03-20\n  - **Time:** 18:00\n  - **Duration:** 8 min\n  - **Location:** Called from London, UK\n\n#### Suspicious Patterns\n- No unusual calling patterns or suspicious activities were detected in the provided data.\n\n### Summary\nJohn Smith (+1-555-0123) has been actively communicating, particularly with the contact +1-555-0124. The communication includes both voice calls and an SMS regarding a meeting. The international call made to the UK is noted, but no suspicious activities were identified."
+      },
+      "summary": "LEO 'John Smith Investigation' executed successfully. Queried 2 agents."
+    }
+  },
+  "leo_4c402289": {
+    "id": "leo_4c402289",
+    "name": "John Smith Tracking",
+    "description": "This Leo job is to track Smith",
+    "target_identifiers": {
+      "name": "John Smith",
+      "phone": " +1-555-0123"
+    },
+    "selected_agents": [
+      "tech",
+      "meta",
+      "blog"
+    ],
+    "schedule": "daily_7am",
+    "created_at": "2025-09-20T16:20:41.425847",
+    "last_run": "2025-09-20T16:21:27.908990",
+    "status": "active",
+    "results": [],
+    "last_results": {
+      "leo_id": "leo_4c402289",
+      "leo_name": "John Smith Tracking",
+      "timestamp": "2025-09-20T16:21:05.012171",
+      "target": {
+        "name": "John Smith",
+        "phone": " +1-555-0123"
+      },
+      "agent_results": {
+        "tech": "### Search Results for John Smith\n\n#### 1. Contact Information\n- **Phone:** +1-555-0123\n- **Email:** john.smith@email.com\n\n#### 2. Messaging Activity\n- **WhatsApp Message:**\n  - **Date:** 2024-03-14\n  - **Message:** \"Hey Maria, ready for the London trip tomorrow?\"\n  - **Contact:** +1-555-0124 (Maria)\n\n- **Telegram Contact:**\n  - **Username:** @johnsmith123\n  - **Contact:** @mariagarcia456\n  - **Last Message Date:** 2024-03-14\n\n#### 3. Purchase History\n- **Purchase Record:**\n  - **Date:** 2024-03-10\n  - **Item:** Flight tickets to London\n  - **Amount:** $1,200\n  - **Payment Method:** Credit Card ending 4567\n\n#### 4. Email Communications\n- **Email Record:**\n  - **From:** john.smith@email.com\n  - **To:** m.garcia@email.com\n  - **Date:** 2024-03-13\n  - **Subject:** London Meeting Schedule\n  - **Content:** \"Hi Maria, Confirming our meeting with the UK partners on March 18th at 2 PM.\"\n\n#### 5. Location Data\n- **Location Record:**\n  - **Phone:** +1-555-0123\n  - **Date:** 2024-03-15\n  - **Location:** Heathrow Airport, London\n  - **IP Address:** 192.168.1.100\n\n### Summary\nJohn Smith is actively communicating with Maria regarding a trip to London, with confirmed flight tickets purchased for $1,200. He has scheduled a meeting with UK partners on March 18th and was located at Heathrow Airport on March 15th.",
+        "meta": "### Query Results for John Smith (+1-555-0123)\n\n#### 1. IP Address History\n- **Log Entry 1**\n  - **Phone:** +1-555-0123\n  - **IP Address:** 192.168.1.100\n  - **Date:** 2024-03-14\n  - **Location:** New York, USA\n  - **ISP:** Verizon\n  \n- **Log Entry 2**\n  - **Phone:** +1-555-0123\n  - **IP Address:** 89.185.45.22\n  - **Date:** 2024-03-16\n  - **Location:** London, UK\n  - **ISP:** British Telecom\n\n#### 2. Device Information\n- **Email Metadata**\n  - **Email:** john.smith@email.com\n  - **IP Address:** 192.168.1.100\n  - **Device:** iPhone 14 Pro\n  - **Location:** JFK Airport, NY\n\n#### 3. WhatsApp Activity Patterns\n- **WhatsApp Log**\n  - **Phone:** +1-555-0123\n  - **Contact:** +1-555-0124\n  - **Last Seen:** 2024-03-14 23:45\n  - **Status:** \"At the airport \u2708\ufe0f\"\n\n#### 4. Email Metadata Analysis\n- **Email Address:** john.smith@email.com\n- **Associated IP:** 192.168.1.100 (same as in IP_LOG_001)\n- **Device Used:** iPhone 14 Pro\n- **Location at Time of Email:** JFK Airport, NY\n\n#### 5. Location Tracking History\n- **Location History**\n  - **Phone:** +1-555-0123\n  - **Date:** 2024-03-14\n  - **Locations Tracked:** Home -> Office -> Restaurant -> Airport\n  - **GPS:** Multiple coordinates logged (specific coordinates not provided)\n\n#### 6. Cross-Reference with Other Identifiers\n- The phone number +1-555-0123 is consistently linked to the IP addresses, WhatsApp activity, and email metadata, indicating a strong correlation between these identifiers.\n\n### Summary\nThe search yielded comprehensive data regarding John Smith, including IP address history, device information, WhatsApp activity, email metadata, and location tracking history. All entries are associated with the provided phone number, indicating active usage and consistent location patterns.",
+        "blog": "### Information Summary for John Smith\n\n#### Professional Background and Job Information\n- **Current Position**: Senior Business Consultant at Global Consulting Inc.\n- **Specialization**: International business development with a focus on UK and Asian markets.\n- **Recent Achievements**: Recently closed a major deal with partners in Tokyo.\n\n#### Business Relationships and Partnerships\n- **Team Collaboration**: Maria Garcia has joined John Smith's team as the International Relations Manager, focusing on expanding operations in Europe and Asia.\n- **Networking Opportunities**: John Smith is involved in networking events, as indicated by a tweet from Robert Johnson expressing excitement about joining him and Maria Garcia for a London conference.\n- **Partnerships Established**: John Smith's team has successfully established new partnerships in London, as reported in a news article.\n\n#### Public Reputation Analysis\n- **Positive Mentions**: \n  - A forum post recommends John Smith as \"highly recommended for international consulting,\" describing him as \"very professional and trustworthy\" with no negative records or complaints.\n  - The news article highlights the team's ethical business practices and strong client relationships, contributing to a positive public image.\n\n#### Social Media Presence\n- **Twitter Mention**: John Smith was mentioned in a tweet by Robert Johnson, indicating his active participation in professional networking events.\n\n#### News Mentions\n- **Article Reference**: Featured in \"Business Daily\" on March 20, 2024, discussing the expansion of Global Consulting's UK operations and the successful partnerships established by his team.\n\n#### Assessment of Character\n- **Overall Sentiment**: The information gathered presents John Smith in a positive light, with multiple sources highlighting his professionalism, trustworthiness, and successful business practices.\n\n### Conclusion\nJohn Smith is a well-regarded professional in the field of international business consulting, with a strong reputation for ethical practices and successful partnerships. His recent activities and collaborations suggest he is actively engaged in expanding his company's operations and networking within the industry."
+      },
+      "summary": "LEO 'John Smith Tracking' executed successfully. Queried 3 agents."
+    }
+  }
+}
+
+
+
+meta_data_db.txt - IP addresses and metadata database
+
+IP_LOG_001
+Phone: +1-555-0123
+IP Address: 192.168.1.100
+Date: 2024-03-14
+Location: New York, USA
+ISP: Verizon
+
+IP_LOG_002
+Phone: +1-555-0123
+IP Address: 89.185.45.22
+Date: 2024-03-16
+Location: London, UK
+ISP: British Telecom
+
+WHATSAPP_001
+Phone: +1-555-0123
+Contact: +1-555-0124
+Last Seen: 2024-03-14 23:45
+Status: "At the airport ✈️"
+
+EMAIL_META_001
+Email: john.smith@email.com
+IP: 192.168.1.100
+Device: iPhone 14 Pro
+Location: JFK Airport, NY
+
+LOCATION_HISTORY_001
+Phone: +1-555-0123
+Date: 2024-03-14
+Locations: Home -> Office -> Restaurant -> Airport
+GPS: Multiple coordinates logged
+
+tech_data_db.txt - Tech/digital footprint data database
+
+TECH_RECORD_001
+Phone: +1-555-0123
+Email: john.smith@email.com
+WhatsApp Message: +1-555-0124
+Date: 2024-03-14
+Message: "Hey Maria, ready for the London trip tomorrow?"
+
+PURCHASE_001
+Name: John Smith
+Email: john.smith@email.com
+Date: 2024-03-10
+Item: Flight tickets to London
+Amount: $1,200
+Payment Method: Credit Card ending 4567
+
+EMAIL_001
+From: john.smith@email.com
+To: m.garcia@email.com
+Date: 2024-03-13
+Subject: London Meeting Schedule
+Content: "Hi Maria, Confirming our meeting with the UK partners on March 18th at 2 PM."
+
+LOCATION_001
+Phone: +1-555-0123
+Date: 2024-03-15
+Location: Heathrow Airport, London
+IP Address: 192.168.1.100
+
+TELEGRAM_CONTACT_001
+Phone: +1-555-0123
+Telegram Username: @johnsmith123
+Contact: @mariagarcia456
+Last Message: 2024-03-14
+
+
+
+
+
+telecom_db.txt - Telecom/call records database
+
+CALL_LOG_001
+Phone: +1-555-0123
+Called: +1-555-0124
+Date: 2024-03-14
+Time: 14:30
+Duration: 5 min
+Type: Voice Call
+
+CALL_LOG_002
+Phone: +1-555-0123
+Called: +1-555-0125
+Date: 2024-03-14
+Time: 15:45
+Duration: 12 min
+Type: Voice Call
+
+CALL_LOG_003
+Phone: +1-555-0124
+Called: +1-555-0123
+Date: 2024-03-14
+Time: 16:00
+Duration: 3 min
+Type: Voice Call
+
+SMS_LOG_001
+Phone: +1-555-0123
+To: +1-555-0124
+Date: 2024-03-14
+Time: 09:30
+Type: SMS
+Message: "Meeting confirmed for tomorrow's flight"
+
+CALL_LOG_004
+Phone: +1-555-0123
+Called: +1-555-0789
+Date: 2024-03-13
+Time: 10:00
+Duration: 25 min
+Type: Voice Call
+Note: Frequent contact - 15 calls this month
+
+CALL_LOG_005
+Phone: +1-555-0123
+Called: +44-20-1234-5678
+Date: 2024-03-20
+Time: 18:00
+Duration: 8 min
+Type: International Call
+Location: Called from London, UK
+
+
+travel_db.txt - Travel records and co-travelers database
+
+
+TRAVEL_RECORD_001
+Name: John Smith
+Passport: US123456789
+Phone: +1-555-0123
+Travel Date: 2024-03-15
+Destination: London, UK
+Return Date: 2024-03-22
+Flight: BA 285
+Co-travelers: Maria Garcia (+1-555-0124), Robert Johnson (+1-555-0125)
+
+TRAVEL_RECORD_002
+Name: Maria Garcia
+Passport: US987654321
+Phone: +1-555-0124
+Travel Date: 2024-03-15
+Destination: London, UK
+Return Date: 2024-03-22
+Flight: BA 285
+Co-travelers: John Smith (+1-555-0123), Robert Johnson (+1-555-0125)
+
+TRAVEL_RECORD_003
+Name: John Smith
+Passport: US123456789
+Phone: +1-555-0123
+Travel Date: 2024-05-10
+Destination: Tokyo, Japan
+Return Date: 2024-05-20
+Flight: ANA 109
+Co-travelers: Maria Garcia (+1-555-0124)
+
+TRAVEL_RECORD_004
+Name: Robert Johnson
+Passport: US456789123
+Phone: +1-555-0125
+Travel Date: 2024-03-15
+Destination: London, UK
+Return Date: 2024-03-22
+Flight: BA 285
+Co-travelers: John Smith (+1-555-0123), Maria Garcia (+1-555-0124)
+
+TRAVEL_RECORD_005
+Name: John Smith
+Passport: US123456789
+Phone: +1-555-0123
+Travel Date: 2024-07-01
+Destination: Paris, France
+Return Date: 2024-07-08
+Flight: AF 023
+Co-travelers: Maria Garcia (+1-555-0124), Sarah Wilson (+1-555-0126)
+

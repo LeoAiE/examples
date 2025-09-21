@@ -1,0 +1,26 @@
+Models folder 
+
+leo_model.py
+
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+class LEOConfig(BaseModel):
+    """Configuration for a LEO (Law Enforcement Officer/Automated Agent)"""
+    name: str
+    description: str
+    target_identifiers: Dict[str, Optional[str]]  # name, phone, email, etc.
+    selected_agents: List[str]  # ['travel', 'telecom', etc.]
+    schedule: Optional[str] = None  # "daily_7am_est", "manual", etc.
+    created_at: Optional[datetime] = None
+    last_run: Optional[datetime] = None
+    status: str = "active"  # active, paused, completed
+    
+class LEOResult(BaseModel):
+    """Results from running a LEO"""
+    leo_id: str
+    timestamp: datetime
+    agent_results: Dict[str, Any]
+    summary: str
+    status: str

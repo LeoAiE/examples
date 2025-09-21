@@ -1,0 +1,398 @@
+api_server.py - Main API server implementation
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+import json
+from agents.orchestrator import Orchestrator
+from agents.chat_manager import ChatManager
+from agents.unified_agent import UnifiedAgent
+from agents.leo_manager import LEOManager
+from config import Config
+from datetime import datetime
+
+app = FastAPI(title="AI Agent Platform API")
+
+# Enable CORS for standalone HTML file to work
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins for local testing
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize orchestrator
+orchestrator = Orchestrator()
+
+# Create unified agent for dashboard
+unified_agent = UnifiedAgent(orchestrator)
+unified_agent.initialize_openai(Config.OPENAI_API_KEY, Config.OPENAI_MODEL)
+orchestrator.agents['unified'] = unified_agent
+print("Unified agent added for dashboard")
+
+# Initialize LEO manager
+leo_manager = LEOManager(orchestrator)
+print(f"LEO Manager initialized with {len(leo_manager.leos)} saved LEOs")
+
+# Initialize chat manager
+chat_manager = ChatManager()
+
+# Request models
+class TargetCardRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    passport: Optional[str] = None
+    ip_address: Optional[str] = None
+
+class SingleAgentRequest(BaseModel):
+    agent: str  # travel, telecom, tech, meta, or blog
+    query: Dict[str, Any]
+
+class LEORequest(BaseModel):
+    name: str
+    description: str
+    agent_type: str
+    schedule: Optional[str] = None
+    query_template: Dict[str, Any]
+
+class CreateLEORequest(BaseModel):
+    name: str
+    description: str
+    selected_agents: List[str]
+    target_name: Optional[str] = None
+    target_phone: Optional[str] = None
+    target_email: Optional[str] = None
+    target_passport: Optional[str] = None
+    target_ip: Optional[str] = None
+    schedule: Optional[str] = None
+
+# Store for LEOs (in production, use a database)
+leos_storage = {}
+
+@app.get("/")
+async def root():
+    return {"message": "AI Agent Platform API", "status": "online"}
+
+@app.get("/agents")
+async def get_available_agents():
+    """Get list of available agents"""
+    return {
+        "agents": [
+            {"id": "travel", "name": "Travel Agent", "description": "Analyzes travel records and co-travelers"},
+            {"id": "telecom", "name": "Telecom Agent", "description": "Analyzes call records and communication patterns"},
+            {"id": "tech", "name": "Tech Data Agent", "description": "Analyzes digital footprint and tech data"},
+            {"id": "meta", "name": "Meta Data Agent", "description": "Analyzes metadata and IP information"},
+            {"id": "blog", "name": "Blog Data Agent", "description": "Analyzes public information and reputation"}
+        ]
+    }
+
+@app.post("/target-card")
+async def create_target_card(request: TargetCardRequest):
+    """Create a comprehensive target card by running all agents"""
+    try:
+        results = orchestrator.create_target_card(
+            name=request.name,
+            phone=request.phone,
+            email=request.email,
+            passport=request.passport,
+            ip_address=request.ip_address
+        )
+        
+        # Generate report
+        report = orchestrator.generate_report(results)
+        
+        return {
+            "status": "success",
+            "results": results,
+            "report": report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/single-agent")
+async def run_single_agent(request: SingleAgentRequest):
+    """Run a single agent with custom query"""
+    try:
+        agent = orchestrator.agents.get(request.agent)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent '{request.agent}' not found")
+        
+        # Run the agent's search method
+        result = agent.search(request.query)
+        
+        return {
+            "status": "success",
+            "agent": request.agent,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/create-leo")
+async def create_leo(request: LEORequest):
+    """Create a new LEO (automated agent task)"""
+    leo_id = f"leo_{len(leos_storage) + 1}"
+    
+    leos_storage[leo_id] = {
+        "id": leo_id,
+        "name": request.name,
+        "description": request.description,
+        "agent_type": request.agent_type,
+        "schedule": request.schedule,
+        "query_template": request.query_template,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    return {
+        "status": "success",
+        "leo_id": leo_id,
+        "message": f"LEO '{request.name}' created successfully"
+    }
+
+@app.get("/leos")
+async def get_leos():
+    """Get all LEOs"""
+    return {
+        "leos": list(leos_storage.values())
+    }
+
+@app.post("/run-leo/{leo_id}")
+async def run_leo(leo_id: str):
+    """Manually trigger a LEO"""
+    leo = leos_storage.get(leo_id)
+    if not leo:
+        raise HTTPException(status_code=404, detail=f"LEO '{leo_id}' not found")
+    
+    try:
+        agent = orchestrator.agents.get(leo["agent_type"])
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent '{leo['agent_type']}' not found")
+        
+        result = agent.search(leo["query_template"])
+        
+        return {
+            "status": "success",
+            "leo": leo,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat/start")
+async def start_chat(agent_type: str):
+    """Start a new chat session with an agent"""
+    if agent_type not in orchestrator.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_type}' not found")
+    
+    session_id = chat_manager.create_session(agent_type)
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "message": f"Chat session started with {agent_type} agent"
+    }
+
+@app.post("/chat/message")
+async def send_chat_message(
+    session_id: str,
+    message: str
+):
+    """Send a message in an existing chat session"""
+    conversation = chat_manager.get_conversation(session_id)
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    agent_type = conversation["agent_type"]
+    agent = orchestrator.agents.get(agent_type)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_type}' not found")
+    
+    # Get conversation history and context
+    history = chat_manager.get_recent_messages(session_id)
+    context = chat_manager.get_context(session_id)
+    
+    # Add user message to history
+    chat_manager.add_message(session_id, "user", message)
+    
+    # Get agent response
+    result = agent.chat(message, history, context)
+    
+    if result["status"] == "success":
+        # Add assistant response to history
+        chat_manager.add_message(
+            session_id, 
+            "assistant", 
+            result["response"],
+            result.get("context", {})
+        )
+        
+        return {
+            "status": "success",
+            "response": result["response"],
+            "context": result.get("context", {}),
+            "session_id": session_id
+        }
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+@app.get("/chat/history/{session_id}")
+async def get_chat_history(session_id: str):
+    """Get chat history for a session"""
+    conversation = chat_manager.get_conversation(session_id)
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        "status": "success",
+        "conversation": conversation
+    }
+
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    """Get all active chat sessions"""
+    sessions = []
+    for session_id, conv in chat_manager.conversations.items():
+        sessions.append({
+            "session_id": session_id,
+            "agent_type": conv["agent_type"],
+            "created_at": conv["created_at"],
+            "message_count": len(conv["messages"])
+        })
+    
+    return {
+        "status": "success",
+        "sessions": sessions
+    }
+
+@app.post("/leo/create")
+async def create_custom_leo(request: CreateLEORequest):
+    """Create a custom LEO with selected agents"""
+    target_identifiers = {}
+    if request.target_name: target_identifiers["name"] = request.target_name
+    if request.target_phone: target_identifiers["phone"] = request.target_phone
+    if request.target_email: target_identifiers["email"] = request.target_email
+    if request.target_passport: target_identifiers["passport"] = request.target_passport
+    if request.target_ip: target_identifiers["ip_address"] = request.target_ip
+    
+    leo_id = leo_manager.create_leo(
+        name=request.name,
+        description=request.description,
+        target_identifiers=target_identifiers,
+        selected_agents=request.selected_agents,
+        schedule=request.schedule
+    )
+    
+    return {
+        "status": "success",
+        "leo_id": leo_id,
+        "message": f"LEO '{request.name}' created successfully"
+    }
+
+@app.get("/leo/list")
+async def list_all_leos():
+    """Get all created LEOs"""
+    return {
+        "status": "success",
+        "leos": leo_manager.get_all_leos()
+    }
+
+@app.post("/leo/run/{leo_id}")
+async def run_leo_by_id(leo_id: str):
+    """Run a specific LEO"""
+    results = leo_manager.run_leo(leo_id)
+    
+    if "error" in results:
+        raise HTTPException(status_code=404, detail=results["error"])
+    
+    return {
+        "status": "success",
+        "results": results
+    }
+
+@app.delete("/leo/delete/{leo_id}")
+async def delete_leo(leo_id: str):
+    """Delete a LEO"""
+    if leo_manager.delete_leo(leo_id):
+        return {"status": "success", "message": "LEO deleted"}
+    else:
+        raise HTTPException(status_code=404, detail="LEO not found")
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    print(f"Starting API server on http://{Config.API_HOST}:{Config.API_PORT}")
+    print("API Documentation: http://localhost:8000/docs")
+    print("Press Ctrl+C to stop the server")
+    
+    uvicorn.run(app, host=Config.API_HOST, port=Config.API_PORT)
+
+
+
+config.py - Configuration settings
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+class Config:
+    # OpenAI Configuration
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL = "gpt-4o-mini"  # You can change to gpt-4 if needed
+    
+    # Data paths (using relative paths for standalone)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    
+    # Database file paths
+    TRAVEL_DB = os.path.join(DATA_DIR, "travel_db.txt")
+    TELECOM_DB = os.path.join(DATA_DIR, "telecom_db.txt")
+    TECH_DATA_DB = os.path.join(DATA_DIR, "tech_data_db.txt")
+    META_DATA_DB = os.path.join(DATA_DIR, "meta_data_db.txt")
+    BLOG_DATA_DB = os.path.join(DATA_DIR, "blog_data_db.txt")
+    
+    # API Configuration (for standalone network)
+    API_HOST = "0.0.0.0"  # Listen on all network interfaces
+    API_PORT = 8000
+    
+    # Agent Configuration
+    MAX_TOKENS = 2000
+    TEMPERATURE = 0.3  # Lower for more consistent results
+
+
+main.py - Main application entry point
+
+empty 
+
+
+
+requirements.txt - Python dependencies list
+
+openai>=1.51.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+
+
+run_server.bat - Windows batch file to start the server
+
+@echo off
+echo Starting AI Agent Platform API Server...
+echo.
+echo Server will be available at: http://localhost:8000
+echo API Documentation: http://localhost:8000/docs
+echo.
+echo Press Ctrl+C to stop the server
+echo.
+python api_server.py
+pause
+
+
