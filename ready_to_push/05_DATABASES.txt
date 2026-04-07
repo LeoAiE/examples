@@ -1,0 +1,1103 @@
+================================================================================
+AI AGENT PLATFORM - ALL DATABASE / DATA FILES
+================================================================================
+This file contains samples or full content of every database used by the
+intelligence analysis agent platform. Each database is searched by specialized
+AI agents to produce cross-referenced intelligence reports.
+
+Total files: 19 (15 intelligence databases + voter.csv + leos.json +
+targeting_workflows.json + create_voter_db.py)
+================================================================================
+
+
+========================================
+FILE: data/travel_db.txt
+DESCRIPTION: Passenger travel records including flight manifests, border crossings, passport data, hotel bookings, co-travelers, and analyst notes. Contains both targets and noise records.
+SAMPLE FORMAT: Each record starts with TRAVEL_RECORD_XXX and includes Name, Arabic Name, Passport, Phone, Travel Date, Departure, Destination, Return Date, Flight, Booking Ref, Seat, Co-travelers, Purpose, Hotel, Notes.
+========================================
+# Travel Database - Passenger Records, Flight Manifests, Border Crossings
+# Agency: Travel Intelligence Division
+# Classification: RESTRICTED
+# Last Updated: 2024-04-15
+
+TRAVEL_RECORD_001
+Name: John Smith
+Arabic Name: N/A
+Passport: US123456789
+Phone: +1-555-0123
+Travel Date: 2024-03-15
+Departure: New York (JFK), USA
+Destination: London (LHR), UK
+Return Date: 2024-03-22
+Flight: BA 285
+Booking Ref: JKSM2024
+Seat: 14A (Business Class)
+Co-travelers: Maria Garcia (+1-555-0124), Robert Johnson (+1-555-0125)
+Purpose: Business - Global Consulting Inc. conference
+Hotel: The Langham, London
+Notes: Subject booked tickets 3 weeks in advance. Paid via corporate Amex.
+
+TRAVEL_RECORD_002
+Name: Maria Garcia
+Arabic Name: N/A
+Passport: US987654321
+Phone: +1-555-0124
+Travel Date: 2024-03-15
+Departure: New York (JFK), USA
+Destination: London (LHR), UK
+Return Date: 2024-03-22
+Flight: BA 285
+Booking Ref: MGRC2024
+Seat: 14B (Business Class)
+Co-travelers: John Smith (+1-555-0123), Robert Johnson (+1-555-0125)
+Purpose: Business - International Relations conference
+Hotel: The Langham, London
+Notes: Same flight as John Smith. Dual citizenship US/Mexico.
+
+TRAVEL_RECORD_003
+Name: John Smith
+Passport: US123456789
+Phone: +1-555-0123
+Travel Date: 2024-05-10
+Departure: New York (JFK), USA
+Destination: Tokyo (NRT), Japan
+Return Date: 2024-05-20
+Flight: ANA 109
+Booking Ref: JKSM0510
+Seat: 2K (First Class)
+Co-travelers: Maria Garcia (+1-555-0124)
+Purpose: Business - Tokyo partnership expansion
+Hotel: The Peninsula Tokyo
+Notes: Subject upgraded to first class. Met with Takeshi Yamamoto (Japanese business partner).
+
+[TRUNCATED - 401 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/meta_data_db.txt
+DESCRIPTION: Technical metadata including IP addresses, device fingerprints (IMEI), browser info, WiFi connections, Bluetooth scans, WhatsApp/email metadata, and location history. Used for digital tracking and device correlation.
+SAMPLE FORMAT: Records are typed (IP_LOG_XXX, WHATSAPP_META_XXX, EMAIL_META_XXX, LOCATION_HISTORY_XXX, DEVICE_FINGERPRINT_XXX, WIFI_CONNECTION_XXX, BLUETOOTH_SCAN_XXX) with fields varying by type.
+========================================
+# Meta Data Database - IP Addresses, Device Fingerprints, Location Data, WiFi Connections
+# Agency: Technical Surveillance Division
+# Classification: SECRET
+# Last Updated: 2024-04-18
+
+IP_LOG_001
+Subject: John Smith
+Phone: +1-555-0123
+IP Address: 192.168.1.100
+Date: 2024-03-14
+Time: 08:30 UTC
+Location: New York, USA
+ISP: Verizon FiOS
+Device: iPhone 14 Pro (IMEI: 353456789012345)
+Browser: Safari 17.3
+Notes: Home IP address. Consistent with residential usage.
+
+IP_LOG_002
+Subject: John Smith
+Phone: +1-555-0123
+IP Address: 89.185.45.22
+Date: 2024-03-16
+Time: 10:15 UTC
+Location: London, UK
+ISP: British Telecom
+Device: iPhone 14 Pro
+Browser: Safari 17.3
+Notes: Hotel WiFi at The Langham, London. Device fingerprint matches home device.
+
+IP_LOG_003
+Subject: Mohammed Al-Husseini / محمد الحسيني
+Phone: +964-770-555-1234
+IP Address: 185.120.33.44
+Date: 2024-03-12
+Time: 14:00 UTC
+Location: Istanbul, Turkey
+ISP: Turk Telekom
+Device: Samsung Galaxy S24 Ultra (IMEI: 356789012345678)
+Browser: Chrome 121
+Notes: Al-Husseini connected to airport WiFi during Istanbul transit.
+
+[TRUNCATED - 291 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/osint_db.txt
+DESCRIPTION: Open Source Intelligence from social media (LinkedIn, Twitter, Facebook, Telegram), public records, news articles, domain WHOIS, dark web scans, and academic profiles. All publicly available information.
+SAMPLE FORMAT: Records are typed (LINKEDIN_XXX, TWITTER_XXX, FACEBOOK_XXX, NEWS_XXX, FORUM_XXX, WHOIS_XXX, SOCIAL_MEDIA_SCAN_XXX, DARK_WEB_SCAN_XXX, ACADEMIC_PROFILE_XXX, PUBLIC_RECORDS_XXX, TELEGRAM_SCAN_XXX) with fields varying by type.
+========================================
+# OSINT Database - Open Source Intelligence, Social Media, Public Records
+# Agency: Open Source Intelligence Division
+# Classification: UNCLASSIFIED / FOR OFFICIAL USE ONLY
+# Last Updated: 2024-04-22
+
+LINKEDIN_001
+Platform: LinkedIn
+Name: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Profile URL: linkedin.com/in/johnsmith-consulting
+Title: Senior Business Consultant at Global Consulting Inc.
+Connections: 1,200+
+Summary: Specializes in international business development with focus on UK and Asian markets.
+Activity: Recently closed major deal with Tokyo partners.
+Endorsements: Strategic Planning (45), International Business (38), Management Consulting (31)
+Notes: Active poster. Posts about business trends 2-3 times per week.
+
+LINKEDIN_002
+Platform: LinkedIn
+Name: Maria Garcia
+Email: m.garcia@email.com
+Profile URL: linkedin.com/in/mariagarcia-ir
+Title: International Relations Manager at Global Consulting Inc.
+Connections: 890+
+Summary: Joined John Smith's team for expanding operations in Europe and Asia.
+Activity: Shared articles about Middle East business opportunities (March 2024).
+Notes: Profile shows increasing focus on MENA region recently.
+
+LINKEDIN_003
+Platform: LinkedIn
+Name: Mohammed Ali Al-Husseini / محمد علي الحسيني
+Email: m.alhusseini@email.com
+Profile URL: linkedin.com/in/mohammed-alhusseini
+Title: Director of International Affairs, Baghdad Chamber of Commerce (غرفة تجارة بغداد)
+Connections: 2,400+
+Summary (English): "Experienced trade facilitator connecting Iraqi businesses with international partners."
+Summary (Arabic): "مدير الشؤون الدولية في غرفة تجارة بغداد"
+Activity: Connected with John Smith on March 1, 2024.
+Notes: SIGNIFICANT - Al-Husseini connected with John Smith on LinkedIn just 2 weeks before their simultaneous London presence.
+
+[TRUNCATED - 295 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/intel_reports_db.txt
+DESCRIPTION: HUMINT intelligence reports, case files, source reports, analyst briefs. Includes source reliability ratings (A-F scale), classification levels, distribution lists, and analyst assessments. Core investigative documents for "Project Aurora."
+SAMPLE FORMAT: Records are typed (INTEL_RPT_XXX, CASE_FILE_XXX, SOURCE_RPT_XXX, ANALYST_BRIEF_XXX, NOISE_RPT_XXX) with Report ID, Classification, Date, Title, Source (with reliability), Subject, Summary, Analyst Notes, Distribution.
+========================================
+# Intelligence Reports Database - HUMINT Reports, Case Files, Analysis Briefs
+# Agency: Intelligence Analysis Division
+# Classification: TOP SECRET / HUMINT CHANNELS
+# Last Updated: 2024-04-30
+
+INTEL_RPT_001
+Report ID: IR-2024-0042
+Classification: SECRET // NOFORN
+Date: 2024-01-20
+Title: Initial Assessment - Iraqi National Mohammed Al-Husseini
+Source: HUMINT Source "CEDAR" (reliability: B - Usually Reliable)
+Subject: Mohammed Ali Al-Husseini / محمد علي الحسيني
+Phone: +964-770-555-1234
+Summary: Source CEDAR reports that Mohammed Al-Husseini, Director of International Affairs at Baghdad Chamber of Commerce, has been observed meeting with individuals connected to foreign intelligence services. Source states that Al-Husseini has been making frequent trips to Amman, Jordan, where he meets with "businessmen" who Source believes are intelligence operatives. Source cannot confirm which service these individuals belong to but suspects Iranian MOIS involvement based on overheard conversations in Arabic: "سمعته يتحدث عن اتصالات مع طهران ومشروع كبير يشمل أمريكيين" (Translation: "I heard him talking about contacts with Tehran and a big project involving Americans").
+Reliability Assessment: B2 - Usually reliable source, information not confirmed by other sources.
+Analyst Notes: This is the first report linking Al-Husseini to intelligence activity. Recommend opening formal investigation file.
+Distribution: CIA/NE Division, DIA/ME Branch, NSA/SIGINT
+
+INTEL_RPT_002
+Report ID: IR-2024-0067
+Classification: TOP SECRET // HUMINT
+Date: 2024-02-28
+Title: Source Report - London Meeting Planned Between Iraqi and American Contacts
+Source: HUMINT Source "FALCON" (reliability: A - Reliable)
+Subject: Mohammed Al-Husseini network
+Summary: Source FALCON reports that Al-Husseini is planning a trip to London in mid-March 2024. Source heard Al-Husseini tell Ahmad Al-Rashidi: "الاجتماع في لندن سيغير كل شيء. الأمريكيون مستعدون للمرحلة الثانية" (Translation: "The London meeting will change everything. The Americans are ready for Phase 2.")
+Reliability Assessment: A2 - Reliable source, information probably true.
+Analyst Notes: Confirms planned London meeting. "Phase 2" suggests an ongoing operation.
+Distribution: CIA/NE, MI5 Liaison, NSA/SIGINT
+
+[TRUNCATED - 249 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/sigint_db.txt
+DESCRIPTION: Signals Intelligence including call detail records (CDR), SMS intercepts, full voice intercepts with Arabic transcripts and English translations. Contains cell tower locations, IMSI numbers, and communication pattern analysis.
+SAMPLE FORMAT: Records are typed (CALL_LOG_XXX, SMS_LOG_XXX, INTERCEPT_XXX) with Phone, Called/To, Date, Time, Duration, Type, Cell Tower, IMSI, Notes. SMS records include Message text. Intercepts include full Arabic transcripts with translations.
+========================================
+# SIGINT Database - Signals Intelligence, Call Detail Records, SMS Intercepts
+# Agency: Signals Intelligence Division
+# Classification: TOP SECRET / COMINT
+# Last Updated: 2024-04-20
+
+CALL_LOG_001
+Phone: +1-555-0123 (John Smith)
+Called: +1-555-0124 (Maria Garcia)
+Date: 2024-03-14
+Time: 14:30 UTC
+Duration: 5 min
+Type: Voice Call
+Cell Tower: NYC-TOWER-0815, Manhattan
+IMSI: 310260000000001
+Notes: Pre-travel coordination call
+
+CALL_LOG_002
+Phone: +1-555-0123 (John Smith)
+Called: +1-555-0125 (Robert Johnson)
+Date: 2024-03-14
+Time: 15:45 UTC
+Duration: 12 min
+Type: Voice Call
+Cell Tower: NYC-TOWER-0815, Manhattan
+IMSI: 310260000000001
+Notes: Lengthy call with Johnson day before London trip.
+
+SMS_LOG_001
+Phone: +1-555-0123 (John Smith)
+To: +1-555-0124 (Maria Garcia)
+Date: 2024-03-14
+Time: 09:30 UTC
+Type: SMS
+Message: "Meeting confirmed for tomorrow's flight"
+Notes: Standard pre-travel message
+
+SMS_LOG_002
+Phone: +964-770-555-1234 (Mohammed Al-Husseini)
+To: +964-771-555-5678 (Ahmad Al-Rashidi)
+Date: 2024-03-15
+Time: 13:45 UTC
+Type: SMS (Arabic)
+Message: "وصلت لندن بسلامة. الاجتماع غداً الساعة ١٠ صباحاً في المكان المتفق عليه"
+Translation: "Arrived London safely. Meeting tomorrow at 10 AM at the agreed location"
+Notes: Confirms Al-Husseini's arrival in London and a pre-planned meeting.
+
+[TRUNCATED - 362 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/fisa_db.txt
+DESCRIPTION: FISA (Foreign Intelligence Surveillance Act) court orders, surveillance logs, intercept summaries, metadata collection results, and renewal orders. Includes Title I orders for US persons and Section 702 for foreign persons.
+SAMPLE FORMAT: Records are typed (FISA_ORDER_XXX, SURVEILLANCE_LOG_XXX, INTERCEPT_SUMMARY_XXX, METADATA_COLLECTION_XXX, FISA_RENEWAL_XXX, NOISE_FISA_XXX) with Order Number, Date, Target, Phone, Order Type, Duration, Judge, Justification, Collection Authorized, Status, and Results.
+========================================
+# FISA Database - Foreign Intelligence Surveillance Act Orders & Collection
+# Agency: FISA Operations Division
+# Classification: TOP SECRET // FISA // NOFORN
+# Last Updated: 2024-05-01
+
+FISA_ORDER_001
+Order Number: FISC-2024-03-0478
+Date Issued: 2024-03-28
+Target: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Order Type: Electronic Surveillance (Title I)
+Duration: 90 days (renewable)
+Authorizing Judge: Hon. James P. Kollar, FISC
+Requesting Agency: FBI Counterintelligence Division
+Justification: Target is a US person believed to be acting as agent of a foreign power. Target has unexplained contact with Mohammed Al-Husseini (Iraqi national connected to foreign intelligence), simultaneous travel to London during suspected intelligence operation, and $15,000 unexplained cash deposit coinciding with foreign contact.
+Collection Authorized:
+  - All telephonic communications from +1-555-0123
+  - All email communications from john.smith@email.com
+  - Internet metadata and browsing history
+  - Location data from mobile device
+  - Financial transaction monitoring
+Status: ACTIVE
+Collection Results Summary:
+  - 342 calls intercepted (March 28 - May 1)
+  - 89 emails captured
+  - 15 calls to/from Robert Johnson (+1-555-0125)
+  - 8 calls to/from unknown UK number (+44-20-1234-5678)
+
+FISA_ORDER_002
+Order Number: FISC-2024-03-0479
+Date Issued: 2024-03-28
+Target: Robert Johnson
+Phone: +1-555-0125
+Order Type: Electronic Surveillance (Title I) + Physical Search
+Duration: 90 days (renewable)
+Authorizing Judge: Hon. James P. Kollar, FISC
+Requesting Agency: FBI Counterintelligence Division
+Justification: Target is a US person with former TOP SECRET/SCI clearance believed to be acting as agent of a foreign power.
+Status: ACTIVE
+
+[TRUNCATED - 217 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/cne_db.txt
+DESCRIPTION: Computer Network Exploitation and digital forensics. Device extractions (Cellebrite/GrayKey), recovered WhatsApp messages, deleted emails, Telegram data, browser history, purchase records, USB forensics, and deleted contacts/photos with EXIF data.
+SAMPLE FORMAT: Records are typed (DEVICE_EXTRACTION_XXX, WHATSAPP_MSG_XXX, EMAIL_FORENSIC_XXX, TELEGRAM_EXTRACTION_XXX, PURCHASE_RECORD_XXX, BROWSER_HISTORY_XXX, DELETED_CONTACT_XXX, DELETED_PHOTO_XXX, USB_FORENSIC_XXX, LOCATION_DATA_XXX) with fields varying by type.
+========================================
+# CNE Database - Computer Network Exploitation, Digital Forensics, Device Extractions
+# Agency: Digital Forensics & Exploitation Division
+# Classification: TOP SECRET / NOFORN
+# Last Updated: 2024-04-25
+
+DEVICE_EXTRACTION_001
+Device: iPhone 14 Pro (John Smith)
+Phone: +1-555-0123
+Email: john.smith@email.com
+IMEI: 353456789012345
+Extraction Date: 2024-04-01
+Tool: Cellebrite UFED Premium
+Extraction Type: Full File System (FFS)
+Data Recovered: 48.2 GB
+Apps Extracted: WhatsApp, Telegram, iMessage, Safari, Mail, Maps, Photos, Contacts
+Deleted Items Recovered: 23 deleted photos, 14 deleted messages, 3 deleted contacts
+Notes: Full extraction successful. Passcode bypassed via Cellebrite.
+
+DEVICE_EXTRACTION_002
+Device: Samsung Galaxy S24 Ultra (Mohammed Al-Husseini / محمد الحسيني)
+Phone: +964-770-555-1234
+IMEI: 356789012345678
+Extraction Date: 2024-04-05
+Tool: Cellebrite UFED Premium
+Extraction Type: Advanced Logical
+Data Recovered: 31.7 GB (partial - encrypted partitions could not be accessed)
+Apps Extracted: WhatsApp, Telegram, Chrome, Gmail, Maps, Gallery
+Apps FAILED to Extract: Signal (encrypted), ProtonMail (encrypted), Wire (encrypted)
+Deleted Items Recovered: 156 deleted WhatsApp messages, 8 deleted photos, 2 deleted contacts
+Notes: PARTIAL SUCCESS - Subject uses device encryption and multiple encrypted apps.
+
+WHATSAPP_MSG_001
+Source: DEVICE_EXTRACTION_001 (John Smith's iPhone)
+Phone: +1-555-0123
+Contact: +1-555-0124 (Maria Garcia)
+Date: 2024-03-14
+Time: 09:15 UTC
+Direction: Outgoing
+Message: "Hey Maria, ready for the London trip tomorrow?"
+Status: Read
+
+[TRUNCATED - 333 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/access_db.txt
+DESCRIPTION: Organizational access assessments for each subject - their institutional positions, government clearances, facility access, contact networks, and exploitation value. Includes ACCESS_PROFILE records, CONTACT_NETWORK maps, and ACCESS_TIMELINE.
+SAMPLE FORMAT: Records are typed (ACCESS_PROFILE_XXX, CONTACT_NETWORK_XXX, ACCESS_TIMELINE_XXX, NOISE_ACCESS_XXX) with Subject, Phone, Email, Assessment Date, Organizational Access, Government Access, Industry Access, Facility Access, Contact Network Summary, Access Value Assessment.
+========================================
+# Access Database - Organizational Access, Clearances, Contact Networks, Facility Access
+# Agency: Access Assessment Division
+# Classification: SECRET // NOFORN
+# Last Updated: 2024-05-01
+
+ACCESS_PROFILE_001
+Subject: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Assessment Date: 2024-03-25
+Organizational Access:
+  - CEO, Global Consulting Inc. (450 Park Avenue, Suite 1200, NYC)
+  - Full access to company financials, client contracts, employee records
+  - Company bank accounts: JPMorgan Chase (Business), Wells Fargo (Operating)
+  - Corporate credit card (Amex Business Platinum)
+  - Company email server (Microsoft 365 Business)
+  - AWS cloud infrastructure (admin access)
+Government Access: NONE
+  - No current security clearance
+  - No government contracts
+Industry Access:
+  - Member: International Trade Association (ITA)
+  - Member: US-Arab Chamber of Commerce (joined February 2024 - RECENT)
+Contact Network Summary:
+  - 12 direct employees at Global Consulting Inc.
+  - 45+ active client relationships
+  - 3 Middle East contacts (NEW - all established since January 2024)
+Access Value Assessment: MODERATE - Smith provides access to legitimate US business networks.
+Last Updated: 2024-03-25
+
+ACCESS_PROFILE_002
+Subject: Maria Garcia
+Phone: +1-555-0124
+Assessment Date: 2024-03-18
+Organizational Access:
+  - VP Operations, Global Consulting Inc.
+  - Access to all company operations, schedules, client databases
+  - Manages company travel bookings and logistics
+  - Access to Smith's calendar and email
+Access Value Assessment: LOW-MODERATE - Garcia's primary value is ACCESS TO SMITH.
+Last Updated: 2024-03-18
+
+[TRUNCATED - 334 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/accessibility_db.txt
+DESCRIPTION: Physical surveillance profiles including daily routines (hour-by-hour), home/office addresses, travel patterns, vulnerability windows for approach, counter-surveillance awareness levels, venue assessments, and GPS tracking data.
+SAMPLE FORMAT: Records are typed (ROUTINE_PROFILE_XXX, VENUE_ASSESSMENT_XXX, GPS_TRACK_XXX, ACCESSIBILITY_SUMMARY_XXX, NOISE_ROUTINE_XXX) with Subject, Phone, Home Address, Office Address, Daily Routine, Travel Patterns, Vulnerability Windows, Counter-Surveillance Awareness, Surveillance Recommendation.
+========================================
+# Accessibility Database - Daily Routines, Location Patterns, Venue Assessments, GPS Tracking
+# Agency: Physical Surveillance Division
+# Classification: SECRET
+# Last Updated: 2024-05-01
+
+ROUTINE_PROFILE_001
+Subject: John Smith
+Phone: +1-555-0123
+Assessment Date: 2024-03-25
+Home Address: 245 West 72nd Street, Apt 14B, New York, NY 10023
+Office Address: 450 Park Avenue, Suite 1200, New York, NY 10022
+Daily Routine (Weekdays):
+  06:30 - Wake up. Checks phone (email, news) in bed for 15 minutes
+  07:00 - Morning coffee at "Blue Bottle Coffee" on Columbus Ave (walks 3 blocks)
+  07:30 - Returns home, shower, dress
+  08:15 - Uber/Lyft to office (or walks if weather is good)
+  08:45 - Arrives at office. Uses keycard + biometric (fingerprint)
+  09:00-12:00 - Client calls, team meetings
+  12:00-13:00 - Lunch at one of 3 restaurants
+  13:00-17:00 - Office work
+  17:30 - Leaves office. Often walks home through Central Park
+  18:30 - Home. Gym in building 3x/week
+  20:00 - Dinner (home cooking or delivery)
+  23:30 - Sleeps
+Vulnerability Windows:
+  - Morning coffee (07:00-07:15) at Blue Bottle - ALONE, predictable
+  - Walking through Central Park (17:30-18:00) - could be approached casually
+Counter-Surveillance Awareness: NONE
+Last Updated: 2024-03-25
+
+[TRUNCATED - 339 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/motivation_db.txt
+DESCRIPTION: Behavioral analysis and psychological profiles. Financial profiles (income, debts, anomalies), psychological assessments, ideological indicators, MICE framework analysis (Money, Ideology, Coercion, Ego), and recruitment vulnerability assessments.
+SAMPLE FORMAT: Records are typed (MOTIVATION_PROFILE_XXX, PSYCH_ASSESSMENT_XXX, NOISE_MOTIVATION_XXX) with Subject, Phone, Email, Primary Motivation, Financial Profile, Financial Anomalies, Financial Pressures, Psychological Profile, Ideological Indicators, Vulnerability Assessment, Recruitment Vulnerability (MICE Framework), Assessment.
+========================================
+# Motivation Database - Financial Pressures, Psychological Profiles, Vulnerability Indicators
+# Agency: Behavioral Analysis Division
+# Classification: TOP SECRET // NOFORN
+# Last Updated: 2024-05-01
+
+MOTIVATION_PROFILE_001
+Subject: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Assessment Date: 2024-03-25
+Primary Motivation: FINANCIAL
+Financial Profile:
+  - Annual salary: $180,000 (CEO of Global Consulting Inc.)
+  - Company revenue: $2.3M (2023) - modest for NYC consulting
+  - Personal savings: ~$120,000
+  - Mortgage: $4,200/month
+  - Student loans: $45,000 remaining (MBA from NYU Stern)
+  - Credit card debt: $12,000
+  - Total monthly expenses: ~$11,000
+  - Total monthly income (declared): ~$15,000
+Financial Anomalies:
+  - $15,000 cash deposit (March 2024) - source UNKNOWN
+  - $5,000/month excess income since January 2024
+  - Total unexplained income: ~$48,000 over 5 months
+Psychological Profile:
+  - Ambitious but frustrated (business growth stalled)
+  - Risk-tolerant, Ego-driven, Trusting
+  - Not ideologically motivated
+Recruitment Vulnerability (MICE Framework):
+  - Money: HIGH
+  - Ideology: LOW
+  - Coercion/Compromise: LOW
+  - Ego: MODERATE
+Assessment: Smith is most likely being RECRUITED through financial incentives and ego appeal.
+Last Updated: 2024-03-25
+
+[TRUNCATED - 302 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/suitability_db.txt
+DESCRIPTION: Recruitment suitability assessments for potential sources/cooperators. Includes factors for/against recruitment, recommended approach phases, polygraph recommendations, reliability predictions, operational names, and priority matrices.
+SAMPLE FORMAT: Records are typed (SUITABILITY_ASSESSMENT_XXX, RECRUITMENT_EVAL_XXX, SOURCE_HANDLING_XXX, NOISE_SUITABILITY_XXX) with Subject, Phone, Assessment Type, Current Relationship, Recruitment Suitability rating, Factors For/Against, Recommended Approach (phased), Polygraph Recommendation, Reliability Prediction, Operational Name.
+========================================
+# Suitability Database - Recruitment Assessments, Reliability Indicators, Polygraph Results
+# Agency: Source Management Division
+# Classification: TOP SECRET // HUMINT // NOFORN
+# Last Updated: 2024-05-01
+
+SUITABILITY_ASSESSMENT_001
+Subject: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Assessment Date: 2024-03-25
+Assessment Type: Potential Source / Cooperator
+Current Relationship: TARGET (not yet approached)
+Recruitment Suitability: MODERATE
+Factors Favoring Recruitment:
+  - Financial motivation
+  - No loyalty to any foreign intelligence service
+  - Legitimate business provides excellent cover
+  - Responds to ego appeal
+Factors Against Recruitment:
+  - May not understand the intelligence implications
+  - Could panic if confronted
+  - No existing trust relationship with US intelligence
+Recommended Approach:
+  - Phase 1: Voluntary FBI interview (non-confrontational)
+  - Phase 2: Reveal knowledge of financial anomalies
+  - Phase 3: Offer cooperation agreement (immunity for intelligence)
+  - Phase 4: Task him to continue engagement under FBI direction
+Polygraph Recommendation: YES
+Reliability Prediction: MODERATE
+Risk Assessment: LOW-MODERATE
+Last Updated: 2024-03-25
+
+[TRUNCATED - 314 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/security_db.txt
+DESCRIPTION: Officer safety and operational security assessments. Risk levels, counter-surveillance awareness ratings, personal security details (weapons, guard dogs, cameras), vehicle info, residence security, digital security practices, and approach recommendations.
+SAMPLE FORMAT: Records are typed (SECURITY_ASSESSMENT_XXX) with Subject, Phone, Email, Risk Level, Known Associates, Organization, Security Concerns, Counter-Surveillance Awareness, Meeting Safety, Recommended Approach, Personal Security, Vehicle, Residence, Digital Security, Warning to Officers.
+========================================
+# Security Assessment Database - Officer Safety & Operational Security
+# Agency: Operational Security Division
+# Classification: SECRET
+# Last Updated: 2024-04-28
+
+SECURITY_ASSESSMENT_001
+Subject: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+Risk Level: MODERATE
+Known Associates: Maria Garcia (+1-555-0124), Robert Johnson (+1-555-0125), Sarah Wilson (+1-555-0126)
+Organization: Global Consulting Inc., 450 Park Avenue, Suite 1200, New York
+Security Concerns:
+  - Subject has traveled to 3 high-risk countries in past year
+  - Connected to Mohammed Al-Husseini via LinkedIn
+  - Associate Robert Johnson has military intelligence background
+Counter-Surveillance Awareness: LOW
+Meeting Safety:
+  - Subject frequents public venues: coffee shops, restaurants, Central Park
+  - Regular at "Blue Bottle Coffee" (M-F, 8:15 AM)
+Recommended Approach: Public venue, daylight hours, cover story: business networking event
+Personal Security: No bodyguards, no security detail, no weapons training
+Vehicle: 2022 Toyota Camry, License: ABC-1234
+Residence: 220 W 72nd St, Apt 14C, Upper West Side, NYC
+  - Doorman building, no personal cameras, lives alone
+Digital Security: Basic phone security, no encrypted messaging
+Warning to Officers: Subject appears cooperative but may be under influence of Robert Johnson.
+Last Updated: 2024-03-20
+
+[TRUNCATED - 329 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/counter_intel_db.txt
+DESCRIPTION: Counter-intelligence assessments including double agent indicators, loyalty assessments, intelligence service affiliation hypotheses, communication security analysis, financial anomaly tracking, deception indicators, and network-wide CI summaries.
+SAMPLE FORMAT: Records are typed (CI_ASSESSMENT_XXX) with Subject, Phone, Email, CI Risk Level, Double Agent Indicators, Counter-Indicators, Loyalty Assessment, Polygraph History, Known Foreign Contacts, Communication Security, Deception Indicators, Financial Anomalies, CI Assessment narrative, Recommended Actions.
+========================================
+# Counter Intelligence Database - CI Assessments, Double Agent Indicators, Loyalty Analysis
+# Agency: Counter Intelligence Division
+# Classification: TOP SECRET / NOFORN
+# Last Updated: 2024-04-30
+
+CI_ASSESSMENT_001
+Subject: John Smith
+Phone: +1-555-0123
+Email: john.smith@email.com
+CI Risk Level: MODERATE
+Assessment Date: 2024-03-25
+Double Agent Indicators:
+  - Unexplained income source detected ($5,000/month above stated salary)
+  - Travel pattern overlaps with known intelligence officer movements in London
+  - LinkedIn connection to Mohammed Al-Husseini
+  - Simultaneous presence in London with Iraqi intelligence-connected individuals
+Counter-Indicators (against double agent hypothesis):
+  - Legitimate business with $2.3M annual revenue
+  - 5-year business track record
+  - No known contact with hostile intelligence services PRIOR to 2024
+Loyalty Assessment: UNCERTAIN
+Financial Anomalies:
+  - $15,000 cash deposit (March 2024), source unknown
+  - $5,000/month excess income
+CI Assessment: John Smith may be a RECRUITMENT TARGET rather than a double agent.
+Recommended Actions:
+  1. Financial audit of Global Consulting Inc.
+  2. Monitor communications for further Iraqi contact
+  3. Track any future Middle East travel
+Last Updated: 2024-03-25
+
+[TRUNCATED - 326 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/geoint_db.txt
+DESCRIPTION: Geospatial intelligence including location profiles (GPS, MGRS grid refs), satellite imagery analysis, facility assessments, colocation events, movement corridor analysis, IP-to-geo correlation, and observation post recommendations. Contains Arabic and English.
+SAMPLE FORMAT: Records are typed (LOCATION_PROFILE_XXX, COLOCATION_EVENT_XXX, SATELLITE_REF_XXX, FACILITY_ASSESSMENT_XXX, MOVEMENT_ANALYSIS_XXX, IP_GEO_CORRELATION_XXX, GRID_REF_XXX, GEOSPATIAL_SUMMARY_XXX, NOISE_LOCATION_XXX) with Subject, Location Type, Address (English + Arabic), GPS Coordinates, MGRS Grid, Description, Cross-References.
+========================================
+LOCATION_PROFILE_001
+Subject: Mohammed Ali Al-Husseini (محمد علي الحسيني)
+Location Type: Primary Residence
+Address: House 47, Street 14, Al-Mansour District, Baghdad, Iraq
+Arabic Address: منزل ٤٧، شارع ١٤، حي المنصور، بغداد، العراق
+GPS Coordinates: 33.3152 N, 44.3661 E
+MGRS Grid: 38S MB 4421 9012
+Elevation: 34m ASL
+Description: Two-story residential compound with walled courtyard, single vehicle entrance facing east. Satellite imagery (dated 2024-01-15) shows white Toyota Land Cruiser regularly parked in courtyard.
+Nearby Landmarks: Al-Mansour Mall (600m NW), Baghdad International School (1.2km E)
+Cell Tower Coverage: Baghdad Tower BG-MNS-014 (primary), BG-MNS-022 (secondary)
+Cross-Reference: See SIGINT CALL_LOG_007 for cell tower triangulation data.
+Last Updated: 2024-11-20
+Classification: CONFIDENTIAL
+
+LOCATION_PROFILE_002
+Subject: Mohammed Ali Al-Husseini (محمد علي الحسيني)
+Location Type: Workplace
+Address: Floor 3, Al-Rasheed Commercial Tower, Karrada District, Baghdad
+Arabic Address: الطابق ٣، برج الرشيد التجاري، حي الكرادة، بغداد
+GPS Coordinates: 33.3098 N, 44.3935 E
+Description: Commercial office building, 8 floors. Subject occupies office 302 on third floor.
+WiFi Networks Detected: "AlRasheed-Guest", "AlRasheed-Corp" (WPA2-Enterprise)
+Last Updated: 2024-12-01
+
+COLOCATION_EVENT_001
+Date: 2024-03-15
+Time Window: 14:00-16:30 UTC+3
+Location: Le Royal Hotel, Amman, Jordan
+Arabic Location: فندق لو رويال، عمّان، الأردن
+GPS Coordinates: 31.9539 N, 35.9106 E
+Subjects Present:
+  - Mohammed Ali Al-Husseini (confirmed via hotel check-in records)
+  - Ahmad Khalid Al-Rashidi (confirmed via SIGINT cell tower)
+  - Unknown male (assessed: possible Abu Khalid)
+Significance: HIGH - Possible operational meeting between target, associate, and handler.
+
+[TRUNCATED - 464 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/pattern_of_life_db.txt
+DESCRIPTION: Detailed pattern-of-life profiles including hour-by-hour daily routines, IP addresses, device usage patterns, WiFi SSIDs, seasonal variations, anomaly detection, and predictability scores (1-10 scale). Some profiles are for non-target individuals.
+SAMPLE FORMAT: Records are typed (POL_PROFILE_XXX) with Subject, Phone, Profile Date, Home Location (with GPS), Work Location, Frequent Locations (numbered), Daily Routine (timestamped), IP Addresses, Device Patterns, Seasonal Patterns, Anomaly Notes, Predictability Score.
+========================================
+# Pattern of Life Database - Daily Routines, Behavioral Patterns, Digital Footprints
+# Agency: Behavioral Analysis Unit
+# Classification: SECRET
+# Last Updated: 2024-06-01
+
+POL_PROFILE_001
+Subject: John Smith
+Phone: +1-555-0123
+Profile Date: 2024-04-10
+Home Location: 245 West 72nd Street, Apt 14B, New York, NY 10023
+  Coordinates: 40.7769 N, 73.9800 W
+  Present: Typically 18:30 - 08:15 weekdays, most of weekend
+  WiFi SSID: "Smith-Home-5G" (MAC: A4:CF:12:xx:xx:xx)
+Work Location: 450 Park Avenue, Suite 1200, New York, NY 10022
+  Present: 08:45 - 17:30 weekdays
+  WiFi SSID: "CorpNet-Secure" (corporate WPA2-Enterprise)
+Frequent Locations:
+  1. Blue Bottle Coffee, Columbus Ave - Daily 07:00-07:15
+  2. Central Park jogging path (72nd St entrance) - Sat 07:30-08:15
+  3. Le Pain Quotidien, Park Ave - 2-3x/week lunch
+  4. Building gym (basement) - Mon/Wed/Fri 18:30-19:30
+  5. Whole Foods, Columbus Circle - Sunday afternoon
+Daily Routine (Weekday):
+  06:30 Wake, phone check (15 min)
+  07:00 Coffee at Blue Bottle (walks, 3 blocks)
+  08:15 Commute to office
+  08:45-17:30 Office
+  17:30 Walk home through Central Park
+  18:30-19:30 Gym (Mon/Wed/Fri)
+  20:00 Dinner
+  23:30 Sleep
+IP Addresses:
+  Home: 72.45.xxx.xxx (Spectrum residential, static)
+  Office: 198.51.xxx.xxx (corporate VPN exit)
+  Mobile: Various T-Mobile IPs
+Device Patterns:
+  iPhone active: 06:30-23:30 daily
+  MacBook Pro: 08:45-17:30 (office)
+  iPad: 20:00-23:00 (home, streaming)
+  No device activity 23:30-06:30 (sleep confirmed)
+Predictability Score: HIGH (8/10)
+
+POL_PROFILE_002
+Subject: Ahmad Al-Rashidi
+Phone: +964-770-123-4567
+Profile Date: 2024-05-15
+Home Location: Karada District, Baghdad, Iraq
+  Coordinates: 33.3000 N, 44.4000 E
+Work Location: Ministry of Finance, Green Zone, Baghdad
+  Present: 08:00-15:00 Sunday-Thursday
+Daily Routine (Sun-Thu):
+  04:15 Wake for Fajr prayer
+  04:30 Al-Rahman Mosque (walks, 5 min)
+  07:00 Drive to work (Green Zone checkpoint, ~30 min)
+  08:00-15:00 Ministry of Finance
+  17:30 Maghrib prayer at mosque
+  20:00 Isha prayer at mosque
+  23:00 Sleep
+Predictability Score: HIGH (9/10) - Prayer schedule creates extremely predictable windows
+
+[TRUNCATED - 191 total lines, follow same format to add more records]
+
+
+========================================
+FILE: data/voter.csv (FULL CONTENT - 31 lines)
+DESCRIPTION: Iraq voter registration records in CSV format with Arabic-only names. Contains 30 voter records across multiple Iraqi cities (Baghdad, Basra, Erbil, Mosul, Najaf, Karbala, Kirkuk, Tikrit, Sulaymaniyah, Diwaniyah, Amarah, Hillah). Used by the voter registration lookup agent.
+SAMPLE FORMAT: CSV with columns: first_name, father_name, grandfather_name, family_name, voter_id, national_id, city, mother_name, phone, date_of_birth, gender, registration_date. All names are in Arabic script.
+========================================
+first_name,father_name,grandfather_name,family_name,voter_id,national_id,city,mother_name,phone,date_of_birth,gender,registration_date
+محمد,علي,حسن,السعدي,VR-2024-00001,19850101234,بغداد,فاطمة,+964-770-123-4567,1985-01-15,ذكر,2024-01-10
+أحمد,حسين,كريم,البياتي,VR-2024-00002,19900315567,بغداد,زينب,+964-771-234-5678,1990-03-15,ذكر,2024-01-12
+فاطمة,مصطفى,إبراهيم,التميمي,VR-2024-00003,19950720890,بغداد,مريم,+964-772-345-6789,1995-07-20,أنثى,2024-01-15
+عمر,صالح,نور,العزاوي,VR-2024-00004,19820610111,بغداد,سارة,+964-770-111-2222,1982-06-10,ذكر,2024-01-18
+عائشة,طارق,عادل,الربيعي,VR-2024-00005,19970305222,بغداد,هدى,+964-771-333-4444,1997-03-05,أنثى,2024-01-20
+حسين,محمد,علي,الموسوي,VR-2024-00006,19800820333,بغداد,ليلى,+964-770-444-5555,1980-08-20,ذكر,2024-01-22
+زينب,أحمد,حسن,العلوي,VR-2024-00007,19930112444,بغداد,فاطمة,+964-771-555-6666,1993-01-12,أنثى,2024-01-25
+خالد,عمر,صالح,الجبوري,VR-2024-00008,19880512345,البصرة,ليلى,+964-773-456-7890,1988-05-12,ذكر,2024-02-01
+سارة,طارق,رشيد,الدليمي,VR-2024-00009,19920830678,البصرة,هدى,+964-774-567-8901,1992-08-30,أنثى,2024-02-05
+جاسم,فاضل,قاسم,البصري,VR-2024-00010,19780215333,البصرة,نور,+964-770-555-6666,1978-02-15,ذكر,2024-02-08
+مريم,هادي,سامي,الأسدي,VR-2024-00011,19991110444,البصرة,رنا,+964-771-777-8888,1999-11-10,أنثى,2024-02-10
+عبدالله,حسين,محمد,الزبيدي,VR-2024-00012,19850930555,البصرة,عائشة,+964-773-888-9999,1985-09-30,ذكر,2024-02-12
+إبراهيم,كريم,ماجد,الكردي,VR-2024-00013,19860425555,أربيل,زينب,+964-750-123-4567,1986-04-25,ذكر,2024-02-15
+نور,قاسم,ماجد,الهاشمي,VR-2024-00014,19980110234,أربيل,رنا,+964-750-234-5678,1998-01-10,أنثى,2024-02-18
+مصطفى,إبراهيم,أحمد,البارزاني,VR-2024-00015,19870715666,أربيل,مريم,+964-750-345-6789,1987-07-15,ذكر,2024-02-20
+طارق,رشيد,عادل,الحديثي,VR-2024-00016,19830920777,الموصل,سارة,+964-770-666-7777,1983-09-20,ذكر,2024-03-01
+ليلى,صالح,حسن,الجبوري,VR-2024-00017,19960415888,الموصل,فاطمة,+964-771-888-9999,1996-04-15,أنثى,2024-03-05
+عادل,زيد,هادي,العبيدي,VR-2024-00018,19830615567,الموصل,دعاء,+964-770-999-0000,1983-06-15,ذكر,2024-03-08
+حسن,علي,حسين,الخفاجي,VR-2024-00019,19890225999,النجف,زينب,+964-772-111-2222,1989-02-25,ذكر,2024-03-10
+دعاء,محمد,أحمد,الحسناوي,VR-2024-00020,19940610111,النجف,مريم,+964-772-222-3333,1994-06-10,أنثى,2024-03-12
+كريم,حسين,علي,الشمري,VR-2024-00021,19870830222,كربلاء,فاطمة,+964-773-333-4444,1987-08-30,ذكر,2024-03-15
+رنا,مصطفى,إبراهيم,الحسيني,VR-2024-00022,19960120333,كربلاء,ليلى,+964-773-444-5555,1996-01-20,أنثى,2024-03-18
+قاسم,ماجد,صالح,الطالباني,VR-2024-00023,19810505444,كركوك,نور,+964-770-222-3333,1981-05-05,ذكر,2024-03-20
+هدى,أحمد,محمد,التركماني,VR-2024-00024,19930815555,كركوك,سارة,+964-771-444-5555,1993-08-15,أنثى,2024-03-22
+صالح,عمر,خالد,التكريتي,VR-2024-00025,19760310666,تكريت,عائشة,+964-770-333-4444,1976-03-10,ذكر,2024-04-01
+سامي,إبراهيم,كريم,السليماني,VR-2024-00026,19880620777,السليمانية,مريم,+964-750-555-6666,1988-06-20,ذكر,2024-04-05
+ماجد,حسن,علي,الكاظمي,VR-2024-00027,19790115888,السليمانية,زينب,+964-750-666-7777,1979-01-15,ذكر,2024-04-08
+رشيد,محمد,حسين,العامري,VR-2024-00028,19840725999,الديوانية,فاطمة,+964-772-555-6666,1984-07-25,ذكر,2024-04-10
+باسم,علي,أحمد,الميالي,VR-2024-00029,19910430111,العمارة,ليلى,+964-773-666-7777,1991-04-30,ذكر,2024-04-12
+هادي,حسين,محمد,البابلي,VR-2024-00030,19860915222,الحلة,نور,+964-774-777-8888,1986-09-15,ذكر,2024-04-15
+
+
+========================================
+FILE: data/leos.json
+DESCRIPTION: LEO (Law Enforcement Operation) saved investigation configurations and their results. Each LEO defines a target (by phone, name, etc.), selected agents to run, schedule, and stores accumulated run results including full intelligence reports with confirmed findings, cross-references, risk assessments, and contact network analysis.
+SAMPLE FORMAT: JSON object keyed by leo_id. Each LEO has: id, name, description, target_identifiers (phone/name/email), selected_agents (list), schedule, created_at, last_run, status, results (array of past runs), last_results (latest full report with sections: confirmed_findings, cross_references, excluded_records, agent_summaries, risk_assessment, contact_network).
+========================================
+{
+  "leo_b31bd11d": {
+    "id": "leo_b31bd11d",
+    "name": "John Smith Investigation",
+    "description": "Monitor all activities for John Smith",
+    "target_identifiers": {
+      "phone": "+1-555-0123"
+    },
+    "selected_agents": [
+      "travel",
+      "meta",
+      "osint",
+      "intel_reports",
+      "sigint",
+      "fisa"
+    ],
+    "schedule": "daily_7am",
+    "created_at": "2025-09-20T13:16:26.522674",
+    "last_run": "2026-04-07T13:21:41.831118",
+    "status": "active",
+    "results": [
+      {
+        "leo_id": "leo_b31bd11d",
+        "timestamp": "2025-09-20T13:16:26.523672",
+        "agent_results": {
+          "travel": "### Travel Records for John Smith\n\n#### Personal Information\n- **Name:** John Smith\n- **Passport:** US123456789\n- **Phone:** +1-555-0123\n...",
+          "telecom": "### Communication Analysis for John Smith (+1-555-0123)\n..."
+        },
+        "summary": ""
+      }
+    ],
+    "last_results": {
+      "leo_id": "leo_b31bd11d",
+      "leo_name": "John Smith Investigation",
+      "timestamp": "2026-04-07T13:21:41.831103",
+      "target": {
+        "name": "John Smith",
+        "phone": "+1-555-0123"
+      },
+      "target_id": "tgt_410dfa7347542486",
+      "run_id": "run_d3c09cdb6752",
+      "report_id": "rpt_c5b1f75483eb",
+      "final_report": "INTELLIGENCE REPORT\n============================================================\nTARGET: John Smith | Phone: +1-555-0123\n...",
+      "sections": {
+        "confirmed_findings": [
+          {
+            "fact": "John Smith traveled from New York (JFK) to London (LHR)...",
+            "source": "TRAVEL_RECORD_001",
+            "confidence": 0.9,
+            "category": "travel",
+            "sources": ["travel"]
+          }
+        ],
+        "cross_references": ["John Smith's phone number found in multiple agents."],
+        "excluded_records": [],
+        "agent_summaries": {
+          "travel": "This agent provided detailed travel records..."
+        },
+        "risk_assessment": "Risk Assessment: Moderate...",
+        "contact_network": {}
+      }
+    }
+  }
+}
+
+[TRUNCATED - 319 total lines, follow same format to add more LEO entries with their results]
+
+
+========================================
+FILE: data/targeting_workflows.json
+DESCRIPTION: Targeting workflow configurations for full multi-agent assessments. Each workflow targets a person with ALL 15 agents (travel, meta, osint, intel_reports, sigint, fisa, cne, access, accessibility, motivation, suitability, security, counter_intel, geoint, pattern_of_life). Stores run history with deduplication stats and the complete fact store of extracted intelligence findings.
+SAMPLE FORMAT: JSON object keyed by workflow_id. Each workflow has: id, name, description, target_identifiers (with name variations and native Arabic name), agents (all 15), created_at, last_run, status, results, run_history (with store_stats: new/duplicate/tombstoned counts), and fact_store (array of extracted facts with source, confidence, category, and dedup metadata).
+========================================
+{
+  "tw_demo0001": {
+    "id": "tw_demo0001",
+    "name": "Ahmad Al-Rashidi Assessment",
+    "description": "Full targeting assessment for Ahmad Al-Rashidi - Baghdad-based Ministry of Finance official. Evaluate access, motivations, pattern of life, and CI risks.",
+    "target_identifiers": {
+      "first_name": "Ahmad",
+      "first_name_variations": "Ahmed, Ahmet",
+      "father_name": "Ali",
+      "third_name": "Hassan",
+      "fourth_name": "Al-Rashidi",
+      "fourth_name_variations": "Rashidi, Al-Rashidy",
+      "native_name": "\u0623\u062d\u0645\u062f \u0639\u0644\u064a \u062d\u0633\u0646 \u0627\u0644\u0631\u0634\u064a\u062f\u064a",
+      "phone": "+964-770-123-4567",
+      "email": "a.rashidi@mof.gov.iq"
+    },
+    "agents": [
+      "travel",
+      "meta",
+      "osint",
+      "intel_reports",
+      "sigint",
+      "fisa",
+      "cne",
+      "access",
+      "accessibility",
+      "motivation",
+      "suitability",
+      "security",
+      "counter_intel",
+      "geoint",
+      "pattern_of_life"
+    ],
+    "created_at": "2026-04-07T10:00:00.000000",
+    "last_run": "2026-04-07T16:30:55.828743",
+    "status": "active",
+    "results": [],
+    "run_history": [
+      {
+        "run_id": "run_53d9151bbd07",
+        "timestamp": "2026-04-07T16:30:55.828722",
+        "store_stats": {
+          "new": 19,
+          "duplicate": 0,
+          "tombstoned": 0
+        },
+        "report_version": 1,
+        "summary": "Targeting 'Ahmad Al-Rashidi Assessment': 15 agents. New: 19, Dupes: 0."
+      }
+    ],
+    "fact_store": [
+      {
+        "fact": "Ahmad Al-Rashidi has a daily routine...",
+        "source": "RECORD_ID",
+        "confidence": 0.85,
+        "category": "pattern_of_life",
+        "sources": ["pattern_of_life"],
+        "hash": "abc123...",
+        "first_seen": "2026-04-07T16:30:55",
+        "last_seen": "2026-04-07T16:30:55",
+        "times_seen": 1,
+        "tombstoned": false
+      }
+    ]
+  }
+}
+
+[TRUNCATED - 157 total lines, follow same format to add more targeting workflow entries]
+
+
+========================================
+FILE: create_voter_db.py (FULL CONTENT - 154 lines)
+DESCRIPTION: Python script to create the Iraq voter registration SQLite database. Inserts 30 Arabic-only voter records across 10+ Iraqi cities. Names are stored ONLY in Arabic -- the AI agent must translate/match from English input when querying.
+SAMPLE FORMAT: Python script using sqlite3. Creates table "voters" with columns: id, first_name, father_name, grandfather_name, family_name, voter_id, national_id, city, mother_name, phone, date_of_birth, gender, registration_date.
+========================================
+"""
+One-time script: Create Iraq voter registration SQLite DB with Arabic-only names.
+Names are stored ONLY in Arabic. The AI must translate/match from English input.
+
+Usage: cd V2/backend && python create_voter_db.py
+"""
+
+import sqlite3
+import os
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "voter_registration.db")
+
+
+def create_database():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+        print(f"Removed old database")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""CREATE TABLE voters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name TEXT,
+        father_name TEXT,
+        grandfather_name TEXT,
+        family_name TEXT,
+        voter_id TEXT UNIQUE,
+        national_id TEXT,
+        city TEXT,
+        mother_name TEXT,
+        phone TEXT,
+        date_of_birth TEXT,
+        gender TEXT,
+        registration_date TEXT
+    )""")
+
+    # All names in Arabic only
+    records = [
+        # Baghdad - بغداد
+        ("محمد", "علي", "حسن", "السعدي", "VR-2024-00001", "19850101234",
+         "بغداد", "فاطمة", "+964-770-123-4567", "1985-01-15", "ذكر", "2024-01-10"),
+        ("أحمد", "حسين", "كريم", "البياتي", "VR-2024-00002", "19900315567",
+         "بغداد", "زينب", "+964-771-234-5678", "1990-03-15", "ذكر", "2024-01-12"),
+        ("فاطمة", "مصطفى", "إبراهيم", "التميمي", "VR-2024-00003", "19950720890",
+         "بغداد", "مريم", "+964-772-345-6789", "1995-07-20", "أنثى", "2024-01-15"),
+        ("عمر", "صالح", "نور", "العزاوي", "VR-2024-00004", "19820610111",
+         "بغداد", "سارة", "+964-770-111-2222", "1982-06-10", "ذكر", "2024-01-18"),
+        ("عائشة", "طارق", "عادل", "الربيعي", "VR-2024-00005", "19970305222",
+         "بغداد", "هدى", "+964-771-333-4444", "1997-03-05", "أنثى", "2024-01-20"),
+        ("حسين", "محمد", "علي", "الموسوي", "VR-2024-00006", "19800820333",
+         "بغداد", "ليلى", "+964-770-444-5555", "1980-08-20", "ذكر", "2024-01-22"),
+        ("زينب", "أحمد", "حسن", "العلوي", "VR-2024-00007", "19930112444",
+         "بغداد", "فاطمة", "+964-771-555-6666", "1993-01-12", "أنثى", "2024-01-25"),
+
+        # Basra - البصرة
+        ("خالد", "عمر", "صالح", "الجبوري", "VR-2024-00008", "19880512345",
+         "البصرة", "ليلى", "+964-773-456-7890", "1988-05-12", "ذكر", "2024-02-01"),
+        ("سارة", "طارق", "رشيد", "الدليمي", "VR-2024-00009", "19920830678",
+         "البصرة", "هدى", "+964-774-567-8901", "1992-08-30", "أنثى", "2024-02-05"),
+        ("جاسم", "فاضل", "قاسم", "البصري", "VR-2024-00010", "19780215333",
+         "البصرة", "نور", "+964-770-555-6666", "1978-02-15", "ذكر", "2024-02-08"),
+        ("مريم", "هادي", "سامي", "الأسدي", "VR-2024-00011", "19991110444",
+         "البصرة", "رنا", "+964-771-777-8888", "1999-11-10", "أنثى", "2024-02-10"),
+        ("عبدالله", "حسين", "محمد", "الزبيدي", "VR-2024-00012", "19850930555",
+         "البصرة", "عائشة", "+964-773-888-9999", "1985-09-30", "ذكر", "2024-02-12"),
+
+        # Erbil - أربيل
+        ("إبراهيم", "كريم", "ماجد", "الكردي", "VR-2024-00013", "19860425555",
+         "أربيل", "زينب", "+964-750-123-4567", "1986-04-25", "ذكر", "2024-02-15"),
+        ("نور", "قاسم", "ماجد", "الهاشمي", "VR-2024-00014", "19980110234",
+         "أربيل", "رنا", "+964-750-234-5678", "1998-01-10", "أنثى", "2024-02-18"),
+        ("مصطفى", "إبراهيم", "أحمد", "البارزاني", "VR-2024-00015", "19870715666",
+         "أربيل", "مريم", "+964-750-345-6789", "1987-07-15", "ذكر", "2024-02-20"),
+
+        # Mosul - الموصل
+        ("طارق", "رشيد", "عادل", "الحديثي", "VR-2024-00016", "19830920777",
+         "الموصل", "سارة", "+964-770-666-7777", "1983-09-20", "ذكر", "2024-03-01"),
+        ("ليلى", "صالح", "حسن", "الجبوري", "VR-2024-00017", "19960415888",
+         "الموصل", "فاطمة", "+964-771-888-9999", "1996-04-15", "أنثى", "2024-03-05"),
+        ("عادل", "زيد", "هادي", "العبيدي", "VR-2024-00018", "19830615567",
+         "الموصل", "دعاء", "+964-770-999-0000", "1983-06-15", "ذكر", "2024-03-08"),
+
+        # Najaf - النجف
+        ("حسن", "علي", "حسين", "الخفاجي", "VR-2024-00019", "19890225999",
+         "النجف", "زينب", "+964-772-111-2222", "1989-02-25", "ذكر", "2024-03-10"),
+        ("دعاء", "محمد", "أحمد", "الحسناوي", "VR-2024-00020", "19940610111",
+         "النجف", "مريم", "+964-772-222-3333", "1994-06-10", "أنثى", "2024-03-12"),
+
+        # Karbala - كربلاء
+        ("كريم", "حسين", "علي", "الشمري", "VR-2024-00021", "19870830222",
+         "كربلاء", "فاطمة", "+964-773-333-4444", "1987-08-30", "ذكر", "2024-03-15"),
+        ("رنا", "مصطفى", "إبراهيم", "الحسيني", "VR-2024-00022", "19960120333",
+         "كربلاء", "ليلى", "+964-773-444-5555", "1996-01-20", "أنثى", "2024-03-18"),
+
+        # Kirkuk - كركوك
+        ("قاسم", "ماجد", "صالح", "الطالباني", "VR-2024-00023", "19810505444",
+         "كركوك", "نور", "+964-770-222-3333", "1981-05-05", "ذكر", "2024-03-20"),
+        ("هدى", "أحمد", "محمد", "التركماني", "VR-2024-00024", "19930815555",
+         "كركوك", "سارة", "+964-771-444-5555", "1993-08-15", "أنثى", "2024-03-22"),
+
+        # Tikrit - تكريت
+        ("صالح", "عمر", "خالد", "التكريتي", "VR-2024-00025", "19760310666",
+         "تكريت", "عائشة", "+964-770-333-4444", "1976-03-10", "ذكر", "2024-04-01"),
+
+        # Sulaymaniyah - السليمانية
+        ("سامي", "إبراهيم", "كريم", "السليماني", "VR-2024-00026", "19880620777",
+         "السليمانية", "مريم", "+964-750-555-6666", "1988-06-20", "ذكر", "2024-04-05"),
+        ("ماجد", "حسن", "علي", "الكاظمي", "VR-2024-00027", "19790115888",
+         "السليمانية", "زينب", "+964-750-666-7777", "1979-01-15", "ذكر", "2024-04-08"),
+
+        # Diwaniyah - الديوانية
+        ("رشيد", "محمد", "حسين", "العامري", "VR-2024-00028", "19840725999",
+         "الديوانية", "فاطمة", "+964-772-555-6666", "1984-07-25", "ذكر", "2024-04-10"),
+
+        # Amarah - العمارة
+        ("باسم", "علي", "أحمد", "الميالي", "VR-2024-00029", "19910430111",
+         "العمارة", "ليلى", "+964-773-666-7777", "1991-04-30", "ذكر", "2024-04-12"),
+
+        # Hillah - الحلة
+        ("هادي", "حسين", "محمد", "البابلي", "VR-2024-00030", "19860915222",
+         "الحلة", "نور", "+964-774-777-8888", "1986-09-15", "ذكر", "2024-04-15"),
+    ]
+
+    c.executemany("""INSERT INTO voters
+        (first_name, father_name, grandfather_name, family_name,
+         voter_id, national_id, city, mother_name, phone,
+         date_of_birth, gender, registration_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", records)
+
+    conn.commit()
+
+    # Verify
+    c.execute("SELECT COUNT(*) FROM voters")
+    count = c.fetchone()[0]
+    print(f"Created database: {DB_PATH}")
+    print(f"Inserted {count} voter records")
+    print()
+
+    # Show sample
+    c.execute("SELECT * FROM voters LIMIT 3")
+    cols = [d[0] for d in c.description]
+    print(f"Columns: {cols}")
+    print()
+    for row in c.fetchall():
+        print(dict(zip(cols, row)))
+        print()
+
+    conn.close()
+
+
+if __name__ == "__main__":
+    create_database()
+
+
+================================================================================
+END OF DATABASE FILES
+================================================================================
+
+SUMMARY OF ALL DATABASES:
+================================================================================
+1.  travel_db.txt         (401 lines) - Flight manifests, border crossings, hotel bookings
+2.  meta_data_db.txt      (291 lines) - IP addresses, device fingerprints, WiFi, Bluetooth, location
+3.  osint_db.txt          (295 lines) - Social media, public records, news, WHOIS, dark web
+4.  intel_reports_db.txt  (249 lines) - HUMINT reports, case files, source reports, analyst briefs
+5.  sigint_db.txt         (362 lines) - Call detail records, SMS intercepts, voice intercepts
+6.  fisa_db.txt           (217 lines) - FISA court orders, surveillance logs, intercept summaries
+7.  cne_db.txt            (333 lines) - Device extractions, WhatsApp/email forensics, USB forensics
+8.  access_db.txt         (334 lines) - Organizational access, clearances, contact networks
+9.  accessibility_db.txt  (339 lines) - Daily routines, vulnerability windows, venue assessments
+10. motivation_db.txt     (302 lines) - Financial profiles, psychological profiles, MICE analysis
+11. suitability_db.txt    (314 lines) - Recruitment assessments, polygraph recs, approach plans
+12. security_db.txt       (329 lines) - Officer safety, counter-surveillance, weapons, residences
+13. counter_intel_db.txt  (326 lines) - CI assessments, double agent indicators, loyalty analysis
+14. geoint_db.txt         (464 lines) - GPS coordinates, MGRS grids, satellite imagery, facilities
+15. pattern_of_life_db.txt(191 lines) - Hour-by-hour routines, device patterns, predictability scores
+16. voter.csv              (31 lines) - Iraq voter registration (30 records, Arabic names) [FULL]
+17. leos.json             (319 lines) - Saved LEO investigation configs and accumulated results
+18. targeting_workflows.json(157 lines) - Multi-agent targeting workflow configs with fact stores
+19. create_voter_db.py    (154 lines) - SQLite voter DB creation script [FULL]
+
+Total lines across all files: ~4,932+
+All databases use consistent record ID schemes (e.g., TRAVEL_RECORD_XXX, IP_LOG_XXX)
+Cross-references between databases use record IDs and phone numbers as linking keys
+Arabic text appears throughout with English translations provided inline
+Noise records (unrelated individuals) are included for realism and to test AI filtering
+================================================================================

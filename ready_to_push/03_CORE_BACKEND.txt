@@ -1,0 +1,1419 @@
+========================================
+FILE: config.py
+========================================
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Config:
+    # Air-gap / Custom LLM endpoint (OpenAI-compatible schema)
+    # Priority: If LLM_BASE_URL + LLM_API_KEY set, uses single endpoint (air-gap mode)
+    # Otherwise falls back to multi-provider logic below
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")       # e.g. "https://internal-llm.mil/v1"
+    LLM_API_KEY = os.getenv("LLM_API_KEY", "")          # Single key for air-gapped
+    LLM_MODEL = os.getenv("LLM_MODEL", "")              # e.g. "claude-sonnet-4.5"
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "")        # "openai" (schema type, not vendor)
+    LLM_MAX_CALLS_PER_TARGET = int(os.getenv("LLM_MAX_CALLS_PER_TARGET", "300"))
+
+    # LLM Provider Configuration (multi-provider fallback)
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "openai")
+    DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
+
+    # Data paths
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+
+    # Database file paths (14 agents)
+    TRAVEL_DB = os.path.join(DATA_DIR, "travel_db.txt")
+    META_DATA_DB = os.path.join(DATA_DIR, "meta_data_db.txt")
+    OSINT_DB = os.path.join(DATA_DIR, "osint_db.txt")
+    INTEL_REPORTS_DB = os.path.join(DATA_DIR, "intel_reports_db.txt")
+    SIGINT_DB = os.path.join(DATA_DIR, "sigint_db.txt")
+    FISA_DB = os.path.join(DATA_DIR, "fisa_db.txt")
+    CNE_DB = os.path.join(DATA_DIR, "cne_db.txt")
+    ACCESS_DB = os.path.join(DATA_DIR, "access_db.txt")
+    ACCESSIBILITY_DB = os.path.join(DATA_DIR, "accessibility_db.txt")
+    MOTIVATION_DB = os.path.join(DATA_DIR, "motivation_db.txt")
+    SUITABILITY_DB = os.path.join(DATA_DIR, "suitability_db.txt")
+    SECURITY_DB = os.path.join(DATA_DIR, "security_db.txt")
+    COUNTER_INTEL_DB = os.path.join(DATA_DIR, "counter_intel_db.txt")
+    GEOINT_DB = os.path.join(DATA_DIR, "geoint_db.txt")
+    PATTERN_OF_LIFE_DB = os.path.join(DATA_DIR, "pattern_of_life_db.txt")
+
+    # Tool-Calling Engine
+    TOOL_CALLING_MAX_ITERATIONS = int(os.getenv("TOOL_CALLING_MAX_ITERATIONS", "10"))
+    TOOL_CALLING_MAX_MISTAKES = int(os.getenv("TOOL_CALLING_MAX_MISTAKES", "3"))
+
+    # API Configuration
+    API_HOST = "0.0.0.0"
+    API_PORT = 8000
+
+    # Agent Configuration
+    MAX_TOKENS = 2000
+    TEMPERATURE = 0.3
+
+    # Tool paths
+    TOOLS_DIR = os.path.join(BASE_DIR, "tools")
+    GLOBAL_TOOLS_DIR = os.path.join(TOOLS_DIR, "shared")
+
+    # Agent-specific tool folders (each agent looks here for its tools)
+    AGENT_TOOLS_BASE = os.path.join(TOOLS_DIR, "agent_specific")
+
+    # Voter database (CSV)
+    VOTER_CSV_PATH = os.path.join(DATA_DIR, "voter.csv")
+
+    # Large data processing
+    LARGE_DATA_CHUNK_SIZE = 3000  # chars per chunk
+    MAX_SUB_WORKERS = 10
+
+    # Sub-Agent Processing
+    SUB_AGENT_RECORDS_PER_WORKER = int(os.getenv("SUB_AGENT_RECORDS_PER_WORKER", "2"))
+    SUB_AGENT_MAX_WORKERS = int(os.getenv("SUB_AGENT_MAX_WORKERS", "50"))
+    RESULTS_DB_PATH = os.path.join(DATA_DIR, "results_store.db")
+    TARGET_STORE_DB_PATH = os.path.join(DATA_DIR, "target_store.db")
+
+    # LLM failover order
+    LLM_FAILOVER_ORDER = ["openai", "anthropic", "google"]
+    LLM_TIMEOUT_SECONDS = 30
+
+
+========================================
+FILE: llm_provider.py
+========================================
+"""
+Multi-LLM Provider Abstraction Layer
+Supports OpenAI, Anthropic (Claude), Google (Gemini), and local LLMs.
+Provides unified interface with automatic failover.
+"""
+
+import time
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class LLMMetrics:
+    """Track per-request metrics."""
+    provider: str = ""
+    model: str = ""
+    latency_ms: float = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_estimate: float = 0.0
+    success: bool = True
+    error: str = ""
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for an LLM provider."""
+    provider: str  # openai, anthropic, google, local
+    api_key: str = ""
+    model: str = ""
+    base_url: str = ""  # For local LLMs (OpenAI-compatible endpoint)
+    temperature: float = 0.3
+    max_tokens: int = 2000
+
+
+class LLMProvider:
+    """Unified LLM interface with failover support."""
+
+    def __init__(self, configs: List[LLMConfig], timeout: int = 30):
+        self.configs = {c.provider: c for c in configs}
+        self.timeout = timeout
+        self.metrics_log: List[LLMMetrics] = []
+        self._clients: Dict[str, Any] = {}
+        self._init_clients()
+
+    def _init_clients(self):
+        """Initialize available LLM clients."""
+        for provider, cfg in self.configs.items():
+            try:
+                if provider == "openai" and cfg.api_key:
+                    from openai import OpenAI
+                    kwargs = {"api_key": cfg.api_key}
+                    if cfg.base_url:
+                        kwargs["base_url"] = cfg.base_url
+                    self._clients["openai"] = OpenAI(**kwargs)
+                elif provider == "anthropic" and cfg.api_key:
+                    import anthropic
+                    self._clients["anthropic"] = anthropic.Anthropic(api_key=cfg.api_key)
+                elif provider == "google" and cfg.api_key:
+                    import google.generativeai as genai
+                    genai.configure(api_key=cfg.api_key)
+                    self._clients["google"] = genai
+                elif provider == "local" and cfg.base_url:
+                    from openai import OpenAI
+                    self._clients["local"] = OpenAI(
+                        api_key="local", base_url=cfg.base_url
+                    )
+            except Exception:
+                pass  # Provider not available
+
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Send a chat completion request. Falls back through providers on failure.
+
+        Args:
+            messages: List of {"role": ..., "content": ...} dicts
+            provider: Specific provider to use (None = try default then failover)
+            model: Override model name
+            temperature: Override temperature
+            max_tokens: Override max tokens
+            stream: Whether to stream the response
+
+        Returns:
+            {"content": str, "metrics": LLMMetrics}
+        """
+        providers_to_try = (
+            [provider] if provider and provider in self._clients
+            else list(self._clients.keys())
+        )
+
+        last_error = ""
+        for prov in providers_to_try:
+            cfg = self.configs.get(prov)
+            if not cfg:
+                continue
+
+            m = model or cfg.model
+            t = temperature if temperature is not None else cfg.temperature
+            mt = max_tokens or cfg.max_tokens
+            metrics = LLMMetrics(provider=prov, model=m)
+            start = time.time()
+
+            try:
+                if prov in ("openai", "local"):
+                    result = self._chat_openai(prov, messages, m, t, mt)
+                elif prov == "anthropic":
+                    result = self._chat_anthropic(messages, m, t, mt)
+                elif prov == "google":
+                    result = self._chat_google(messages, m, t, mt)
+                else:
+                    continue
+
+                metrics.latency_ms = (time.time() - start) * 1000
+                metrics.input_tokens = result.get("input_tokens", 0)
+                metrics.output_tokens = result.get("output_tokens", 0)
+                self.metrics_log.append(metrics)
+
+                return {"content": result["content"], "metrics": metrics}
+
+            except Exception as e:
+                metrics.success = False
+                metrics.error = str(e)
+                metrics.latency_ms = (time.time() - start) * 1000
+                self.metrics_log.append(metrics)
+                last_error = str(e)
+                continue
+
+        return {
+            "content": f"All LLM providers failed. Last error: {last_error}",
+            "metrics": LLMMetrics(success=False, error=last_error),
+        }
+
+    def _chat_openai(self, provider_key, messages, model, temperature, max_tokens):
+        client = self._clients[provider_key]
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        choice = response.choices[0]
+        usage = response.usage
+        return {
+            "content": choice.message.content,
+            "input_tokens": usage.prompt_tokens if usage else 0,
+            "output_tokens": usage.completion_tokens if usage else 0,
+        }
+
+    def _chat_anthropic(self, messages, model, temperature, max_tokens):
+        client = self._clients["anthropic"]
+        # Anthropic uses system as a separate param
+        system_msg = ""
+        chat_msgs = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_msg += msg["content"] + "\n"
+            else:
+                chat_msgs.append(msg)
+
+        kwargs = {
+            "model": model or "claude-sonnet-4-20250514",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": chat_msgs,
+        }
+        if system_msg:
+            kwargs["system"] = system_msg.strip()
+
+        response = client.messages.create(**kwargs)
+        return {
+            "content": response.content[0].text,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        }
+
+    def _chat_google(self, messages, model, temperature, max_tokens):
+        genai = self._clients["google"]
+        gmodel = genai.GenerativeModel(model or "gemini-pro")
+
+        # Convert messages to Gemini format
+        history = []
+        last_content = ""
+        for msg in messages:
+            if msg["role"] == "system":
+                history.append({"role": "user", "parts": [msg["content"]]})
+                history.append({"role": "model", "parts": ["Understood."]})
+            elif msg["role"] == "user":
+                last_content = msg["content"]
+            elif msg["role"] == "assistant":
+                history.append({"role": "model", "parts": [msg["content"]]})
+
+        chat = gmodel.start_chat(history=history)
+        response = chat.send_message(
+            last_content,
+            generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
+        )
+        return {
+            "content": response.text,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+
+    def get_metrics_summary(self) -> Dict[str, Any]:
+        """Get summary of all LLM usage metrics."""
+        if not self.metrics_log:
+            return {"total_requests": 0}
+
+        total = len(self.metrics_log)
+        successes = sum(1 for m in self.metrics_log if m.success)
+        avg_latency = sum(m.latency_ms for m in self.metrics_log) / total
+        total_input = sum(m.input_tokens for m in self.metrics_log)
+        total_output = sum(m.output_tokens for m in self.metrics_log)
+
+        by_provider = {}
+        for m in self.metrics_log:
+            if m.provider not in by_provider:
+                by_provider[m.provider] = {"requests": 0, "successes": 0}
+            by_provider[m.provider]["requests"] += 1
+            if m.success:
+                by_provider[m.provider]["successes"] += 1
+
+        return {
+            "total_requests": total,
+            "successes": successes,
+            "failures": total - successes,
+            "avg_latency_ms": round(avg_latency, 2),
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "by_provider": by_provider,
+        }
+
+
+========================================
+FILE: main.py
+========================================
+"""Entry point - run with: python main.py"""
+import uvicorn
+
+if __name__ == "__main__":
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)
+
+
+========================================
+FILE: api_server.py
+========================================
+"""V2 API Server - FastAPI with 15 agents + unified, LLM metrics, tool-calling engine,
+SNA, per-target persistent storage, SSE live events, and enhanced endpoints."""
+
+import asyncio
+import threading
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+from agents.orchestrator import Orchestrator
+from agents.chat_manager import ChatManager
+from agents.unified_agent import UnifiedAgent
+from agents.leo_manager import LEOManager
+from tools.shared.event_bus import EventBus
+from config import Config
+from datetime import datetime
+
+app = FastAPI(title="LEO Agentic AI Platform V2")
+
+# Global event bus for SSE streaming
+event_bus = EventBus()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize core systems
+orchestrator = Orchestrator()
+unified_agent = UnifiedAgent(orchestrator, orchestrator.llm)
+orchestrator.agents["unified"] = unified_agent
+leo_manager = LEOManager(orchestrator)
+chat_manager = ChatManager()
+
+# Initialize Tool Registry
+from tools.tool_registry import ToolRegistry
+from tools.database_connectors.text_file_connector import TextFileConnector
+from tools.database_connectors.json_connector import JSONConnector
+from tools.api_integrations.osint_tools import SocialMediaScanner, WHOISLookup
+from tools.api_integrations.reverse_lookup import ReversePhoneLookup, ReverseEmailLookup, BreachDatabaseCheck
+tool_registry = ToolRegistry()
+tool_registry.register(TextFileConnector())
+tool_registry.register(JSONConnector())
+tool_registry.register(SocialMediaScanner())
+tool_registry.register(WHOISLookup())
+tool_registry.register(ReversePhoneLookup())
+tool_registry.register(ReverseEmailLookup())
+tool_registry.register(BreachDatabaseCheck())
+# Register global tools in registry too for API access
+for tool_name, tool in orchestrator.global_tools.items():
+    tool_registry.register(tool)
+tool_registry.discover_tools()
+
+print(f"V2 Platform initialized with {len(orchestrator.agents)} agents")
+print(f"Global tools: {list(orchestrator.global_tools.keys())}")
+print(f"Tool Registry loaded {len(tool_registry.tools)} tools")
+print(f"LEO Manager loaded {len(leo_manager.leos)} saved LEOs")
+
+
+# --- Request Models ---
+class TargetCardRequest(BaseModel):
+    # Structured name parts with variations
+    first_name: Optional[str] = None
+    first_name_variations: Optional[str] = None  # comma-separated
+    father_name: Optional[str] = None
+    father_name_variations: Optional[str] = None
+    third_name: Optional[str] = None
+    third_name_variations: Optional[str] = None
+    fourth_name: Optional[str] = None
+    fourth_name_variations: Optional[str] = None
+    native_name: Optional[str] = None  # name in native language (Arabic etc.)
+    kunya: Optional[str] = None  # e.g., Abu Khalid
+    aliases: Optional[str] = None  # comma-separated nicknames
+    # Other identifiers
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    passport: Optional[str] = None
+    ip_address: Optional[str] = None
+    # Backward compat
+    name: Optional[str] = None  # treated as first_name if first_name not set
+
+class SingleAgentRequest(BaseModel):
+    agent: str
+    query: Dict[str, Any]
+
+class AgenticSearchRequest(BaseModel):
+    agent: str
+    query: str
+    # Optional structured identifiers for richer search
+    identifiers: Optional[Dict[str, str]] = None
+
+class CreateLEORequest(BaseModel):
+    name: str
+    description: str = ""
+    selected_agents: List[str]
+    schedule: str = "manual"
+    # Structured name parts
+    target_first_name: Optional[str] = None
+    target_first_name_variations: Optional[str] = None
+    target_father_name: Optional[str] = None
+    target_father_name_variations: Optional[str] = None
+    target_third_name: Optional[str] = None
+    target_third_name_variations: Optional[str] = None
+    target_fourth_name: Optional[str] = None
+    target_fourth_name_variations: Optional[str] = None
+    target_native_name: Optional[str] = None
+    target_kunya: Optional[str] = None
+    target_aliases: Optional[str] = None
+    # Other identifiers
+    target_phone: Optional[str] = None
+    target_email: Optional[str] = None
+    target_passport: Optional[str] = None
+    target_ip: Optional[str] = None
+    # Backward compat
+    target_name: Optional[str] = None
+
+
+class UpdateLEORequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    selected_agents: Optional[List[str]] = None
+    schedule: Optional[str] = None
+    target_first_name: Optional[str] = None
+    target_first_name_variations: Optional[str] = None
+    target_father_name: Optional[str] = None
+    target_father_name_variations: Optional[str] = None
+    target_third_name: Optional[str] = None
+    target_third_name_variations: Optional[str] = None
+    target_fourth_name: Optional[str] = None
+    target_fourth_name_variations: Optional[str] = None
+    target_native_name: Optional[str] = None
+    target_kunya: Optional[str] = None
+    target_aliases: Optional[str] = None
+    target_phone: Optional[str] = None
+    target_email: Optional[str] = None
+    target_passport: Optional[str] = None
+    target_ip: Optional[str] = None
+
+
+# --- Health & Info ---
+@app.get("/")
+async def root():
+    return {"status": "online", "platform": "LEO Agentic AI V2",
+            "agents": len(orchestrator.agents), "version": "2.0.0"}
+
+
+@app.get("/agents")
+async def get_available_agents():
+    agent_info = {
+        "travel": {"name": "Travel Agent", "icon": "✈️", "desc": "Travel records & co-travelers", "category": "intelligence"},
+        "meta": {"name": "Meta Data Agent", "icon": "🌐", "desc": "IPs & locations", "category": "intelligence"},
+        "osint": {"name": "OSINT Agent", "icon": "🌍", "desc": "Open source intelligence & social media", "category": "intelligence"},
+        "intel_reports": {"name": "Intel Reports Agent", "icon": "📋", "desc": "Intelligence reports & case files", "category": "intelligence"},
+        "sigint": {"name": "SIGINT Agent", "icon": "📡", "desc": "Signals intelligence, CDR, calls & SMS", "category": "intelligence"},
+        "fisa": {"name": "FISA Agent", "icon": "🔍", "desc": "Surveillance & metadata", "category": "intelligence"},
+        "cne": {"name": "CNE Agent", "icon": "🖥️", "desc": "Digital forensics, emails, chat logs", "category": "intelligence"},
+        "access": {"name": "Access Agent", "icon": "🔑", "desc": "Information access assessment", "category": "targeting"},
+        "accessibility": {"name": "Accessibility Agent", "icon": "📍", "desc": "Physical/digital accessibility", "category": "targeting"},
+        "motivation": {"name": "Motivation Agent", "icon": "🧠", "desc": "Motivations & vulnerabilities", "category": "targeting"},
+        "suitability": {"name": "Suitability Agent", "icon": "✅", "desc": "Recruitment suitability", "category": "targeting"},
+        "security": {"name": "Security Agent", "icon": "🛡️", "desc": "Officer safety & operational security", "category": "ci_security"},
+        "counter_intel": {"name": "Counter Intelligence Agent", "icon": "🕵️", "desc": "Double agent detection & CI risk", "category": "ci_security"},
+        "geoint": {"name": "GEOINT Agent", "icon": "🛰️", "desc": "Geospatial intelligence & location analysis", "category": "targeting"},
+        "pattern_of_life": {"name": "Pattern of Life Agent", "icon": "🕐", "desc": "Daily routines, behavioral patterns & predictability", "category": "targeting"},
+        "sna": {"name": "Social Network Agent", "icon": "🕸️", "desc": "Social network analysis & connection mapping", "category": "analysis"},
+        "unified": {"name": "Unified Agent", "icon": "🎯", "desc": "Cross-database search", "category": "system"},
+    }
+    return {"agents": agent_info}
+
+
+# --- Target Card ---
+# Background pipeline results storage
+_pipeline_results: Dict[str, Any] = {}
+
+
+@app.post("/target-card")
+async def create_target_card(request: TargetCardRequest,
+                              background: bool = False):
+    try:
+        card_kwargs = {}
+        for field in ["first_name", "first_name_variations", "father_name",
+                       "father_name_variations", "third_name", "third_name_variations",
+                       "fourth_name", "fourth_name_variations", "native_name",
+                       "kunya", "aliases", "phone", "email", "passport", "ip_address", "name"]:
+            val = getattr(request, field, None)
+            if val:
+                card_kwargs[field] = val
+
+        if background:
+            # Generate run_id upfront so client can subscribe to SSE
+            from tools.shared.target_store import TargetStore
+            identifiers = {k: v for k, v in card_kwargs.items() if v}
+            target_id = TargetStore.generate_target_id(identifiers)
+            run_id = f"run_pending_{id(request)}"
+
+            def _run_pipeline():
+                try:
+                    results = orchestrator.create_target_card(
+                        event_bus=event_bus, **card_kwargs)
+                    actual_run_id = results.get("run_id", run_id)
+                    _pipeline_results[actual_run_id] = results
+                except Exception as exc:
+                    from tools.shared.event_bus import PipelineEvent
+                    event_bus.emit(PipelineEvent(
+                        event_type="pipeline_error",
+                        run_id=run_id,
+                        message=str(exc),
+                    ))
+
+            thread = threading.Thread(target=_run_pipeline, daemon=True)
+            thread.start()
+            return {"status": "started", "target_id": target_id,
+                    "message": "Pipeline running in background. Connect to /events/{run_id} for live updates."}
+
+        # Synchronous mode (default)
+        results = orchestrator.create_target_card(event_bus=event_bus, **card_kwargs)
+        run_id = results.get("run_id", "")
+        if run_id:
+            _pipeline_results[run_id] = results
+        return {"status": "success", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Single Agent ---
+@app.post("/single-agent")
+async def run_single_agent(request: SingleAgentRequest):
+    if request.agent not in orchestrator.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{request.agent}' not found")
+    try:
+        agent = orchestrator.agents[request.agent]
+        result = agent.search(request.query)
+        return {"status": "success", "results": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Agentic Search (QCoder-style tool-calling) ---
+@app.post("/agentic-search")
+async def run_agentic_search(request: AgenticSearchRequest):
+    """Run an autonomous agent search using the tool-calling engine.
+    The AI agent decides which tools to call (cross-agent queries, etc.)
+    in a recursive loop until it has a complete analysis.
+
+    Best for: security, counter_intel, access, accessibility, motivation, suitability agents.
+    These agents have cross-agent access and can query each other's databases."""
+    if request.agent not in orchestrator.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{request.agent}' not found")
+    try:
+        agent = orchestrator.agents[request.agent]
+        result = agent.agentic_search(request.query,
+                                       identifiers=request.identifiers or {})
+        return {"status": "success", "results": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- LEO Management ---
+@app.post("/leo/create")
+async def create_leo(request: CreateLEORequest):
+    target_ids = {}
+    # Map request fields to target identifier keys
+    field_map = {
+        "target_first_name": "first_name",
+        "target_first_name_variations": "first_name_variations",
+        "target_father_name": "father_name",
+        "target_father_name_variations": "father_name_variations",
+        "target_third_name": "third_name",
+        "target_third_name_variations": "third_name_variations",
+        "target_fourth_name": "fourth_name",
+        "target_fourth_name_variations": "fourth_name_variations",
+        "target_native_name": "native_name",
+        "target_kunya": "kunya",
+        "target_aliases": "aliases",
+        "target_phone": "phone",
+        "target_email": "email",
+        "target_passport": "passport",
+        "target_ip": "ip_address",
+        "target_name": "name",
+    }
+    for req_field, id_key in field_map.items():
+        val = getattr(request, req_field, None)
+        if val:
+            target_ids[id_key] = val
+    leo_id = leo_manager.create_leo(
+        name=request.name, description=request.description,
+        target_identifiers=target_ids, selected_agents=request.selected_agents,
+        schedule=request.schedule,
+    )
+    return {"status": "success", "leo_id": leo_id}
+
+
+@app.get("/leo/list")
+async def list_all_leos():
+    return {"leos": leo_manager.get_all_leos()}
+
+
+@app.post("/leo/run/{leo_id}")
+async def run_leo_by_id(leo_id: str, background: bool = False):
+    if leo_id not in leo_manager.leos:
+        raise HTTPException(status_code=404, detail="LEO not found")
+
+    if background:
+        # Non-blocking: start in background thread, return run_id immediately
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        leo = leo_manager.leos[leo_id]
+        target_ids = leo["target_identifiers"]
+        target_store = orchestrator.target_store
+        target_id, _ = target_store.get_or_create_target(target_ids)
+        run_id = target_store.start_run(target_id, leo["selected_agents"], leo_id=leo_id)
+
+        def _run_in_bg():
+            try:
+                leo_manager.run_leo(leo_id, event_bus=event_bus,
+                                    run_id=run_id, target_id=target_id)
+            except Exception as e:
+                print(f"[LEO BG] Error running {leo_id}: {e}")
+
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _run_in_bg)
+
+        return {
+            "status": "started",
+            "run_id": run_id,
+            "leo_id": leo_id,
+            "leo_name": leo["name"],
+            "message": "LEO execution started in background. Subscribe to SSE for live updates.",
+        }
+    else:
+        # Blocking: wait for completion (original behavior)
+        result = leo_manager.run_leo(leo_id, event_bus=event_bus)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return {"status": "success", "results": result}
+
+
+@app.put("/leo/update/{leo_id}")
+async def update_leo(leo_id: str, request: UpdateLEORequest):
+    updates = {}
+    if request.name is not None:
+        updates["name"] = request.name
+    if request.description is not None:
+        updates["description"] = request.description
+    if request.selected_agents is not None:
+        updates["selected_agents"] = request.selected_agents
+    if request.schedule is not None:
+        updates["schedule"] = request.schedule
+
+    # Build target_identifiers from request fields if any provided
+    field_map = {
+        "target_first_name": "first_name",
+        "target_first_name_variations": "first_name_variations",
+        "target_father_name": "father_name",
+        "target_father_name_variations": "father_name_variations",
+        "target_third_name": "third_name",
+        "target_third_name_variations": "third_name_variations",
+        "target_fourth_name": "fourth_name",
+        "target_fourth_name_variations": "fourth_name_variations",
+        "target_native_name": "native_name",
+        "target_kunya": "kunya",
+        "target_aliases": "aliases",
+        "target_phone": "phone",
+        "target_email": "email",
+        "target_passport": "passport",
+        "target_ip": "ip_address",
+    }
+    target_ids = {}
+    has_target_update = False
+    for req_field, id_key in field_map.items():
+        val = getattr(request, req_field, None)
+        if val is not None:
+            has_target_update = True
+            target_ids[id_key] = val
+    if has_target_update:
+        updates["target_identifiers"] = target_ids
+
+    if not leo_manager.update_leo(leo_id, updates):
+        raise HTTPException(status_code=404, detail="LEO not found")
+    return {"status": "success"}
+
+
+@app.get("/leo/{leo_id}")
+async def get_leo_detail(leo_id: str):
+    leo = leo_manager.get_leo(leo_id)
+    if not leo:
+        raise HTTPException(status_code=404, detail="LEO not found")
+    return leo
+
+
+@app.get("/leo/{leo_id}/results")
+async def get_leo_results(leo_id: str):
+    leo = leo_manager.get_leo(leo_id)
+    if not leo:
+        raise HTTPException(status_code=404, detail="LEO not found")
+    return {
+        "leo_id": leo_id,
+        "leo_name": leo.get("name"),
+        "last_results": leo.get("last_results"),
+        "run_history": leo.get("run_history", []),
+    }
+
+
+@app.delete("/leo/delete/{leo_id}")
+async def delete_leo(leo_id: str):
+    if leo_manager.delete_leo(leo_id):
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="LEO not found")
+
+
+# --- Targeting Workflow ---
+from agents.targeting_manager import TargetingManager
+targeting_manager = TargetingManager(orchestrator)
+
+
+class CreateTargetingWorkflowRequest(BaseModel):
+    name: str
+    description: str = ""
+    target_first_name: Optional[str] = None
+    target_first_name_variations: Optional[str] = None
+    target_father_name: Optional[str] = None
+    target_father_name_variations: Optional[str] = None
+    target_third_name: Optional[str] = None
+    target_third_name_variations: Optional[str] = None
+    target_fourth_name: Optional[str] = None
+    target_fourth_name_variations: Optional[str] = None
+    target_native_name: Optional[str] = None
+    target_kunya: Optional[str] = None
+    target_aliases: Optional[str] = None
+    target_phone: Optional[str] = None
+    target_email: Optional[str] = None
+    target_passport: Optional[str] = None
+    target_ip: Optional[str] = None
+    target_name: Optional[str] = None
+
+
+@app.post("/targeting/create")
+async def create_targeting_workflow(request: CreateTargetingWorkflowRequest):
+    target_ids = {}
+    field_map = {
+        "target_first_name": "first_name",
+        "target_first_name_variations": "first_name_variations",
+        "target_father_name": "father_name",
+        "target_father_name_variations": "father_name_variations",
+        "target_third_name": "third_name",
+        "target_third_name_variations": "third_name_variations",
+        "target_fourth_name": "fourth_name",
+        "target_fourth_name_variations": "fourth_name_variations",
+        "target_native_name": "native_name",
+        "target_kunya": "kunya",
+        "target_aliases": "aliases",
+        "target_phone": "phone",
+        "target_email": "email",
+        "target_passport": "passport",
+        "target_ip": "ip_address",
+        "target_name": "name",
+    }
+    for req_field, id_key in field_map.items():
+        val = getattr(request, req_field, None)
+        if val:
+            target_ids[id_key] = val
+    wf_id = targeting_manager.create_workflow(
+        name=request.name, description=request.description,
+        target_identifiers=target_ids,
+    )
+    return {"status": "success", "workflow_id": wf_id}
+
+
+class UpdateTargetingWorkflowRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    target_first_name: Optional[str] = None
+    target_first_name_variations: Optional[str] = None
+    target_father_name: Optional[str] = None
+    target_father_name_variations: Optional[str] = None
+    target_third_name: Optional[str] = None
+    target_third_name_variations: Optional[str] = None
+    target_fourth_name: Optional[str] = None
+    target_fourth_name_variations: Optional[str] = None
+    target_native_name: Optional[str] = None
+    target_kunya: Optional[str] = None
+    target_aliases: Optional[str] = None
+    target_phone: Optional[str] = None
+    target_email: Optional[str] = None
+    target_passport: Optional[str] = None
+    target_ip: Optional[str] = None
+
+
+@app.put("/targeting/update/{wf_id}")
+async def update_targeting_workflow(wf_id: str, request: UpdateTargetingWorkflowRequest):
+    updates = {}
+    if request.name is not None:
+        updates["name"] = request.name
+    if request.description is not None:
+        updates["description"] = request.description
+    field_map = {
+        "target_first_name": "first_name",
+        "target_first_name_variations": "first_name_variations",
+        "target_father_name": "father_name",
+        "target_father_name_variations": "father_name_variations",
+        "target_third_name": "third_name",
+        "target_third_name_variations": "third_name_variations",
+        "target_fourth_name": "fourth_name",
+        "target_fourth_name_variations": "fourth_name_variations",
+        "target_native_name": "native_name",
+        "target_kunya": "kunya",
+        "target_aliases": "aliases",
+        "target_phone": "phone",
+        "target_email": "email",
+        "target_passport": "passport",
+        "target_ip": "ip_address",
+    }
+    target_ids = {}
+    any_target_field = False
+    for req_field, id_key in field_map.items():
+        val = getattr(request, req_field, None)
+        if val is not None:
+            target_ids[id_key] = val
+            any_target_field = True
+    if any_target_field:
+        updates["target_identifiers"] = target_ids
+    if targeting_manager.update_workflow(wf_id, updates):
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Workflow not found")
+
+
+@app.get("/targeting/list")
+async def list_targeting_workflows():
+    return {"workflows": targeting_manager.get_all_workflows()}
+
+
+@app.post("/targeting/run/{wf_id}")
+async def run_targeting_workflow(wf_id: str, background: bool = True):
+    if wf_id not in targeting_manager.workflows:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if background:
+        import asyncio
+        wf = targeting_manager.workflows[wf_id]
+        target_ids = wf["target_identifiers"]
+        target_store = orchestrator.target_store
+        target_id, _ = target_store.get_or_create_target(target_ids)
+        run_id = target_store.start_run(
+            target_id, targeting_manager.ALL_AGENTS, leo_id=wf_id)
+
+        def _run_in_bg():
+            try:
+                targeting_manager.run_workflow(
+                    wf_id, event_bus=event_bus,
+                    run_id=run_id, target_id=target_id)
+            except Exception as e:
+                print(f"[TARGETING BG] Error running {wf_id}: {e}")
+
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _run_in_bg)
+        return {
+            "status": "started", "run_id": run_id,
+            "workflow_id": wf_id, "workflow_name": wf["name"],
+            "message": "Targeting workflow started in background.",
+        }
+    else:
+        result = targeting_manager.run_workflow(wf_id, event_bus=event_bus)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return {"status": "success", "results": result}
+
+
+@app.get("/targeting/{wf_id}")
+async def get_targeting_detail(wf_id: str):
+    wf = targeting_manager.get_workflow(wf_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return wf
+
+
+@app.get("/targeting/{wf_id}/results")
+async def get_targeting_results(wf_id: str):
+    wf = targeting_manager.get_workflow(wf_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return {
+        "workflow_id": wf_id,
+        "workflow_name": wf.get("name"),
+        "last_results": wf.get("last_results"),
+        "run_history": wf.get("run_history", []),
+    }
+
+
+@app.delete("/targeting/{wf_id}")
+async def delete_targeting_workflow(wf_id: str):
+    if targeting_manager.delete_workflow(wf_id):
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Workflow not found")
+
+
+# --- Chat ---
+@app.post("/chat/start")
+async def start_chat(agent_type: str):
+    if agent_type not in orchestrator.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_type}' not found")
+    session_id = chat_manager.create_session(agent_type)
+    return {"status": "success", "session_id": session_id, "agent_type": agent_type}
+
+
+@app.post("/chat/message")
+async def send_chat_message(session_id: str, message: str):
+    conversation = chat_manager.get_conversation(session_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Session not found")
+    agent_type = conversation["agent_type"]
+    agent = orchestrator.agents.get(agent_type)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_type}' not found")
+    chat_manager.add_message(session_id, "user", message)
+    history = chat_manager.get_recent_messages(session_id, 5)
+    context = chat_manager.get_context(session_id)
+    result = agent.chat(message=message, conversation_history=history, context=context)
+    if result.get("status") == "success":
+        chat_manager.add_message(session_id, "assistant", result["response"], result.get("context"))
+    return result
+
+
+@app.get("/chat/history/{session_id}")
+async def get_chat_history(session_id: str):
+    conv = chat_manager.get_conversation(session_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return conv
+
+
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    return {"sessions": chat_manager.list_sessions()}
+
+
+# --- LLM Metrics ---
+@app.get("/metrics/llm")
+async def get_llm_metrics():
+    return orchestrator.get_llm_metrics()
+
+
+# --- Tool System ---
+@app.get("/tools")
+async def list_tools(category: Optional[str] = None):
+    """List all registered tools, optionally filtered by category."""
+    return {"tools": tool_registry.list_tools(category)}
+
+
+@app.post("/tools/execute/{tool_name}")
+async def execute_tool(tool_name: str, params: Dict[str, Any] = {}):
+    """Execute a registered tool with parameters."""
+    result = tool_registry.execute_tool(tool_name, **params)
+    return {
+        "success": result.success,
+        "data": result.data,
+        "error": result.error,
+        "tool": result.tool_name,
+        "execution_time_ms": result.execution_time_ms,
+    }
+
+
+@app.get("/metrics/tools")
+async def get_tool_metrics():
+    """Get tool execution metrics."""
+    return tool_registry.get_metrics()
+
+
+# --- Name Variations ---
+@app.get("/tools/name-variations/{name}")
+async def get_name_variations(name: str):
+    """Generate all Arabic/English name variations."""
+    gen = orchestrator.global_tools.get("name_variation_generator")
+    if not gen:
+        raise HTTPException(status_code=500, detail="Name variation generator not available")
+    result = gen.execute(name=name, use_llm=True)
+    return {"success": result.success, "data": result.data, "error": result.error}
+
+
+# --- Voter Database ---
+class VoterSearchRequest(BaseModel):
+    name: Optional[str] = None
+    voter_id: Optional[str] = None
+    national_id: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None
+    father_name: Optional[str] = None
+    mother_name: Optional[str] = None
+    expand_name_variations: bool = True
+
+
+@app.post("/tools/voter-search")
+async def search_voter_db(request: VoterSearchRequest):
+    """Search Iraq voter registration database with name variation expansion."""
+    voter_tool = orchestrator.global_tools.get("voter_db_search")
+    if not voter_tool:
+        raise HTTPException(status_code=500, detail="Voter database tool not available")
+
+    # Expand name variations if requested
+    name_variations = []
+    if request.name and request.expand_name_variations:
+        gen = orchestrator.global_tools.get("name_variation_generator")
+        if gen:
+            var_result = gen.execute(name=request.name, use_llm=True)
+            if var_result.success:
+                name_variations = var_result.data.get("search_terms", [])
+
+    result = voter_tool.execute(
+        name=request.name or "", name_variations=name_variations,
+        voter_id=request.voter_id or "", national_id=request.national_id or "",
+        phone=request.phone or "", city=request.city or "",
+        father_name=request.father_name or "", mother_name=request.mother_name or "",
+    )
+    return {"success": result.success, "data": result.data, "error": result.error}
+
+
+# --- Sub-Agent Results Review ---
+
+@app.get("/results/jobs")
+async def list_processing_jobs(limit: int = 50):
+    """List all sub-agent processing jobs, most recent first."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    jobs = store.get_all_jobs(limit=limit)
+    return {"jobs": jobs, "total": len(jobs)}
+
+
+@app.get("/results/job/{job_id}")
+async def get_job_results(job_id: str):
+    """Get full results for a job, including all findings and per-worker details."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    result = store.get_job_results(job_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.get("/results/job/{job_id}/worker/{worker_id}")
+async def get_worker_detail(job_id: str, worker_id: int):
+    """Get detailed result for a specific worker, including raw input/output."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    result = store.get_worker_detail(job_id, worker_id)
+    if not result:
+        raise HTTPException(status_code=404,
+                            detail=f"Worker {worker_id} not found for job {job_id}")
+    return result
+
+
+@app.get("/results/job/{job_id}/findings")
+async def get_job_findings(job_id: str, relevance: Optional[str] = None):
+    """Get findings for a job, optionally filtered by relevance (high/medium/low)."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    full = store.get_job_results(job_id)
+    if "error" in full:
+        raise HTTPException(status_code=404, detail=full["error"])
+    findings = full["findings"]
+    if relevance:
+        findings = [f for f in findings if f["relevance"] == relevance]
+    return {"job_id": job_id, "findings": findings, "total": len(findings)}
+
+
+# --- Synthesized Reports ---
+
+@app.get("/reports/{report_id}")
+async def get_report(report_id: str):
+    """Get a full synthesized report with all sections."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    report = store.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    return report
+
+
+@app.get("/reports/{report_id}/excluded")
+async def get_report_excluded(report_id: str):
+    """Get excluded records for a report (for human review)."""
+    store = getattr(orchestrator, "results_store", None)
+    if not store:
+        raise HTTPException(status_code=500, detail="ResultsStore not initialized")
+    report = store.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    excluded = report.get("sections_json", {}).get("excluded_records", [])
+    return {
+        "report_id": report_id,
+        "excluded_records": excluded,
+        "total": len(excluded),
+    }
+
+
+# --- Network Analysis ---
+
+class NetworkAnalysisRequest(BaseModel):
+    phone: Optional[str] = None
+    name: Optional[str] = None
+    sigint_data: Optional[str] = None
+    travel_data: Optional[str] = None
+    fisa_data: Optional[str] = None
+
+
+@app.post("/network/analyze")
+async def analyze_network(request: NetworkAnalysisRequest):
+    """Run standalone network analysis on provided data.
+    If no data provided, uses agent databases for the given phone/name."""
+    sna_agent = orchestrator.agents.get("sna")
+    if not sna_agent:
+        raise HTTPException(status_code=500, detail="SNA agent not available")
+
+    preprocessed = {}
+    if request.sigint_data:
+        from tools.agent_specific.sigint.cdr_query import CDRQueryTool
+        preprocessed["sigint"] = CDRQueryTool().execute(data=request.sigint_data)
+    if request.travel_data:
+        from tools.agent_specific.travel.travel_query import TravelQueryTool
+        preprocessed["travel"] = TravelQueryTool().execute(data=request.travel_data)
+    if request.fisa_data:
+        from tools.agent_specific.fisa.fisa_query import FISAQueryTool
+        preprocessed["fisa"] = FISAQueryTool().execute(data=request.fisa_data)
+
+    result = sna_agent.analyze_full_network(
+        target_phone=request.phone or "",
+        target_name=request.name or "",
+        preprocessed=preprocessed,
+    )
+    return {"status": "success", "results": result}
+
+
+@app.get("/tool-definitions")
+async def get_tool_definitions(category: Optional[str] = None):
+    """Get centralized tool definitions, optionally filtered by category."""
+    from tools.tool_definitions import get_all, get_by_category, get_categories
+    if category:
+        return {"tools": get_by_category(category), "category": category}
+    return {"tools": get_all(), "categories": get_categories()}
+
+
+# =========================================================================
+# SSE Live Events
+# =========================================================================
+
+@app.get("/events/{run_id}")
+async def stream_events(run_id: str):
+    """SSE endpoint for live pipeline events.
+
+    Frontend connects via EventSource(GET /events/{run_id}).
+    Replays history for late-connecting clients, then streams live.
+    """
+    async def event_generator():
+        queue = await event_bus.subscribe(run_id)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield event.to_sse()
+                    # Stop streaming after pipeline completes or errors
+                    if event.event_type in ("pipeline_complete", "pipeline_error"):
+                        break
+                except asyncio.TimeoutError:
+                    # Send keepalive comment to prevent connection drop
+                    yield ": keepalive\n\n"
+        finally:
+            event_bus.unsubscribe(run_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/events/{run_id}/history")
+async def get_event_history(run_id: str):
+    """Get all events for a run (for clients that missed the SSE stream)."""
+    history = event_bus.get_history(run_id)
+    return {"run_id": run_id, "events": [e.to_dict() for e in history],
+            "total": len(history)}
+
+
+@app.get("/pipeline/result/{run_id}")
+async def get_pipeline_result(run_id: str):
+    """Get the final result of a background pipeline run."""
+    if run_id in _pipeline_results:
+        return {"status": "complete", "results": _pipeline_results[run_id]}
+    # Check if run exists and is still running
+    target_store = orchestrator.target_store
+    run = target_store.get_run(run_id)
+    if run:
+        return {"status": run["status"],
+                "message": f"Pipeline is {run['status']}"}
+    raise HTTPException(status_code=404, detail="Run not found")
+
+
+# =========================================================================
+# Target Management Endpoints
+# =========================================================================
+
+@app.get("/targets")
+async def list_targets(limit: int = 50):
+    """List all targets with summary stats."""
+    target_store = orchestrator.target_store
+    targets = target_store.list_targets(limit=limit)
+    return {"targets": targets, "total": len(targets)}
+
+
+@app.get("/targets/{target_id}")
+async def get_target(target_id: str):
+    """Get target details with stats."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    return target
+
+
+@app.get("/targets/{target_id}/records")
+async def get_target_records(target_id: str,
+                              agent: Optional[str] = None,
+                              record_type: Optional[str] = None,
+                              in_report: Optional[bool] = None,
+                              include_deleted: bool = False):
+    """Get all records for a target, with optional filters."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    if agent:
+        records = target_store.get_records_by_agent(target_id, agent)
+    elif record_type:
+        records = target_store.get_records_by_type(target_id, record_type)
+    else:
+        records = target_store.get_all_records(target_id,
+                                                include_deleted=include_deleted)
+
+    if in_report is not None:
+        records = [r for r in records
+                   if bool(r.get("in_report")) == in_report]
+
+    return {"target_id": target_id, "records": records,
+            "total": len(records)}
+
+
+@app.get("/targets/{target_id}/records/{record_id}")
+async def get_record_detail(target_id: str, record_id: int):
+    """Get full detail for a single record."""
+    target_store = orchestrator.target_store
+    record = target_store.get_record_detail(record_id)
+    if not record or record.get("target_id") != target_id:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return record
+
+
+@app.delete("/targets/{target_id}/records/{record_id}")
+async def delete_record(target_id: str, record_id: int,
+                         reason: str = "user_deleted"):
+    """Soft-delete a record and add tombstone (prevents re-import)."""
+    target_store = orchestrator.target_store
+    record = target_store.get_record_detail(record_id)
+    if not record or record.get("target_id") != target_id:
+        raise HTTPException(status_code=404, detail="Record not found")
+    success = target_store.delete_record(record_id, reason=reason)
+    if success:
+        return {"status": "deleted", "record_id": record_id,
+                "message": "Record tombstoned — will not be re-imported"}
+    raise HTTPException(status_code=500, detail="Delete failed")
+
+
+@app.post("/targets/{target_id}/records/{record_id}/restore")
+async def restore_record(target_id: str, record_id: int):
+    """Restore a deleted record and remove tombstone."""
+    target_store = orchestrator.target_store
+    record = target_store.get_record_detail(record_id)
+    if not record or record.get("target_id") != target_id:
+        raise HTTPException(status_code=404, detail="Record not found")
+    success = target_store.restore_record(record_id)
+    if success:
+        return {"status": "restored", "record_id": record_id}
+    raise HTTPException(status_code=500, detail="Restore failed")
+
+
+@app.get("/targets/{target_id}/tool-executions")
+async def get_tool_executions(target_id: str,
+                               agent: Optional[str] = None,
+                               tool: Optional[str] = None):
+    """Get tool execution audit trail for a target."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    execs = target_store.get_tool_executions(target_id,
+                                              agent_key=agent,
+                                              tool_name=tool)
+    return {"target_id": target_id, "tool_executions": execs,
+            "total": len(execs)}
+
+
+@app.get("/targets/{target_id}/audit")
+async def get_audit_comparison(target_id: str,
+                                agent: Optional[str] = None):
+    """Compare records in report vs not in report (audit view)."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    return target_store.get_audit_comparison(target_id, agent_key=agent)
+
+
+@app.get("/targets/{target_id}/reports")
+async def get_report_versions(target_id: str):
+    """List all report versions for a target."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    versions = target_store.get_report_versions(target_id)
+    return {"target_id": target_id, "versions": versions,
+            "total": len(versions)}
+
+
+@app.get("/targets/{target_id}/reports/latest")
+async def get_latest_report(target_id: str):
+    """Get the latest report for a target."""
+    target_store = orchestrator.target_store
+    report = target_store.get_latest_report(target_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="No reports for target")
+    return report
+
+
+@app.get("/targets/{target_id}/reports/{version}")
+async def get_report_version(target_id: str, version: int):
+    """Get a specific report version."""
+    target_store = orchestrator.target_store
+    report = target_store.get_report_by_version(target_id, version)
+    if not report:
+        raise HTTPException(status_code=404,
+                            detail=f"Report v{version} not found")
+    return report
+
+
+@app.get("/targets/{target_id}/runs")
+async def get_target_runs(target_id: str):
+    """Get all pipeline runs for a target."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    runs = target_store.get_runs(target_id)
+    return {"target_id": target_id, "runs": runs, "total": len(runs)}
+
+
+@app.get("/targets/{target_id}/tombstones")
+async def get_tombstones(target_id: str):
+    """Get all tombstoned (user-deleted) records for a target."""
+    target_store = orchestrator.target_store
+    target = target_store.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    tombstones = target_store.get_tombstones(target_id)
+    return {"target_id": target_id, "tombstones": tombstones,
+            "total": len(tombstones)}
+
+

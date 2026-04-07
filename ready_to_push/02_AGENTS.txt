@@ -1,0 +1,3625 @@
+========================================
+FILE: agents/__init__.py
+========================================
+
+
+
+========================================
+FILE: agents/base_agent.py
+========================================
+"""
+V2 BaseAgent - Redesigned with LLM Provider injection, tool discovery
+(global + agent-specific), name variation support, large data chunking,
+and entity extraction.
+"""
+
+import json
+import os
+import re
+from typing import Dict, Any, List, Optional
+from llm_provider import LLMProvider
+
+
+class BaseAgent:
+    def __init__(
+        self,
+        name: str,
+        db_path: str,
+        role_description: str,
+        llm: Optional[LLMProvider] = None,
+        tools: Optional[List] = None,
+        agent_key: str = "",
+    ):
+        self.name = name
+        self.db_path = db_path
+        self.role_description = role_description
+        self.llm = llm
+        self.tools = tools or []
+        self.agent_key = agent_key or name.lower().replace(" ", "_")
+        self.database_content = ""  # Loaded on demand by tools
+
+        # Tool references (set by orchestrator after init)
+        self.global_tools = {}
+        self.agent_tools = {}
+
+        # Tool-calling engine (set by orchestrator for agents that need it)
+        self.tool_calling_engine = None
+
+    def set_llm(self, llm: LLMProvider):
+        self.llm = llm
+
+    def set_tools(self, global_tools: Dict, agent_tools: Dict = None):
+        """Set available tools. Called by orchestrator."""
+        self.global_tools = global_tools or {}
+        self.agent_tools = agent_tools or {}
+
+    def get_available_tools(self) -> Dict:
+        """Get all tools this agent can use (global + agent-specific)."""
+        all_tools = {}
+        all_tools.update(self.global_tools)
+        all_tools.update(self.agent_tools)
+        return all_tools
+
+    def use_tool(self, tool_name: str, **kwargs):
+        """Execute a tool by name."""
+        tools = self.get_available_tools()
+        tool = tools.get(tool_name)
+        if not tool:
+            return {"error": f"Tool '{tool_name}' not available for {self.name}"}
+        return tool.execute(**kwargs)
+
+    def expand_name_variations(self, name: str) -> List[str]:
+        """Use the name variation generator to expand a name."""
+        gen = self.global_tools.get("name_variation_generator")
+        if gen:
+            result = gen.execute(name=name, use_llm=bool(self.llm))
+            if result.success:
+                return result.data.get("search_terms", [name])
+        return [name]
+
+    def process_large_data(self, data: str, query: str,
+                           source_label: str = "Record") -> Dict:
+        """Use large data processor for big datasets."""
+        proc = self.global_tools.get("large_data_processor")
+        if proc:
+            result = proc.execute(data=data, query=query, source_label=source_label)
+            if result.success:
+                return result.data
+        return {"findings": [], "error": "Large data processor not available"}
+
+    def process_with_sub_agents(self, data: str, query: str,
+                                source_label: str = "Record",
+                                records_per_worker: int = 2,
+                                record_delimiter: str = "\n\n") -> Dict:
+        """Use SubAgentProcessor for large datasets.
+        Sub-agents inherit this agent's role_description as domain expertise."""
+        proc = self.global_tools.get("sub_agent_processor")
+        if proc:
+            result = proc.execute(
+                data=data,
+                query=query,
+                parent_agent_role=self.role_description,
+                parent_agent_name=self.name,
+                source_label=source_label,
+                records_per_worker=records_per_worker,
+                record_delimiter=record_delimiter,
+            )
+            if result.success:
+                return result.data
+        # Fallback to old large_data_processor
+        return self.process_large_data(data, query, source_label)
+
+    def agentic_search(self, query: str, **kwargs) -> Dict[str, Any]:
+        """QCoder-style autonomous search using the tool-calling engine.
+
+        The AI agent autonomously decides which tools to call (query other agents,
+        search own database, etc.) in a recursive loop until it has a complete analysis.
+
+        This is used by CI/Security and Targeting agents that need cross-agent data.
+        Falls back to regular search() if no tool-calling engine is configured.
+        """
+        if not self.tool_calling_engine:
+            # Fallback to regular search
+            print(f"\n[AGENT:{self.agent_key}] No tool-calling engine, falling back to regular search")
+            return self.search({"query": query, "identifier": query}, **kwargs)
+
+        # Build system prompt — NO direct database access, tools only
+        system_prompt = f"""{self.role_description}
+
+You do NOT have direct database access. You MUST use tools to query data.
+- search_own_database: Search your own database for records matching a query
+- query_agent: Search other agents' databases for cross-referencing
+- expand_name_variations: Expand Arabic name variations before searching
+- extract_entities: Extract phones/emails/names from text
+- search_text_database: Search a specific database by name
+- search_voter_database: Search voter registration records
+
+IMPORTANT RESPONSE RULES:
+- Include ALL details from every matching record: record IDs, dates, locations,
+  names, phone numbers, companions, document numbers, and all other fields.
+- Do NOT summarize or abbreviate. List every record individually with full details.
+- Present data record-by-record in a structured format so nothing is lost.
+- Use the tools to gather all relevant intelligence, then use attempt_completion
+  with your COMPLETE findings including every record and every field.
+"""
+
+        print(f"\n{'='*60}")
+        print(f"[AGENT:{self.agent_key}] AGENTIC SEARCH: {query}")
+        print(f"[AGENT:{self.agent_key}] Using tool-calling engine with {len(self.tool_calling_engine.tools)} tools")
+        print(f"{'='*60}")
+
+        # Build enhanced user message with structured identifiers if available
+        identifiers = kwargs.get("identifiers", {})
+        extra_info = ""
+        if identifiers:
+            parts = []
+            for field, label in [("native_name", "Native name"), ("kunya", "Kunya"),
+                                 ("aliases", "Aliases"), ("phone", "Phone")]:
+                val = identifiers.get(field, "")
+                if val:
+                    parts.append(f"  {label}: {val}")
+            if parts:
+                extra_info = "\n\nAdditional target identifiers:\n" + "\n".join(parts)
+
+        user_message = (
+            f"Conduct a thorough analysis for: {query}\n"
+            f"{extra_info}\n\n"
+            "Use your tools to search your own database and cross-reference "
+            "with other agents' data. When you have gathered enough information, "
+            "use <attempt_completion> with your final comprehensive analysis."
+        )
+
+        # Run the tool-calling engine
+        result = self.tool_calling_engine.run(
+            system_prompt=system_prompt,
+            user_message=user_message,
+        )
+
+        # Print summary
+        tool_calls = result.get("tool_calls_made", [])
+        tools_used = [tc["tool"] for tc in tool_calls]
+        print(f"\n{'='*60}")
+        print(f"[AGENT:{self.agent_key}] SEARCH COMPLETE")
+        print(f"  Iterations: {result.get('iterations', 0)}")
+        print(f"  Tools called: {len(tool_calls)} -> {tools_used}")
+        print(f"  Status: {'SUCCESS' if result.get('success') else 'FAILED'}")
+        print(f"{'='*60}\n")
+
+        return {
+            "agent": self.name,
+            "query": query,
+            "results": result.get("result", ""),
+            "status": "success" if result.get("success") else "error",
+            "agentic": {
+                "iterations": result.get("iterations", 0),
+                "tool_calls": result.get("tool_calls_made", []),
+            },
+        }
+
+    def load_database(self) -> str:
+        try:
+            if os.path.exists(self.db_path):
+                with open(self.db_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    return content if content else "Database file is empty"
+            else:
+                os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+                with open(self.db_path, "w", encoding="utf-8") as f:
+                    f.write("")
+                return "Database file created but is empty"
+        except Exception as e:
+            return f"Error reading file: {str(e)}"
+
+    def search(
+        self,
+        query: Dict[str, Any],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Search using tool-calling engine. Zero direct DB access."""
+        if not self.llm:
+            return {"error": "LLM provider not initialized", "status": "error"}
+
+        if not self.tool_calling_engine:
+            return {"agent": self.name, "query": query,
+                    "error": "No tool-calling engine configured", "status": "error"}
+
+        try:
+            # Build search description from identifiers
+            search_desc = self._build_search_description(query)
+
+            system_prompt = f"""{self.role_description}
+
+You do NOT have direct database access. Use tools to find data:
+- search_own_database: Search your own database for matching records
+- query_agent: Search other agents' databases for cross-references
+- expand_name_variations: Expand Arabic name variations before searching
+- extract_entities: Extract phones/emails/names from text
+
+IMPORTANT RESPONSE RULES:
+- Search thoroughly using all name variations.
+- Include ALL details from every matching record: record IDs, dates, locations,
+  names, phone numbers, companions, document numbers, and all other fields.
+- Do NOT summarize or abbreviate. List every record individually with full details.
+- If the tool returns 10 records, your answer must include details from all 10.
+- Present data record-by-record in a structured format so nothing is lost.
+- When done, use attempt_completion with ALL relevant records found.
+"""
+            user_message = f"Search for and return all records matching:\n{search_desc}"
+
+            result = self.tool_calling_engine.run(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                temperature=temperature or 0.3,
+                max_tokens=max_tokens or 8000,
+                provider=provider,
+                model=model,
+                auto_complete_large_results=True,
+            )
+            return {
+                "agent": self.name, "query": query,
+                "results": result.get("result", ""),
+                "status": "success" if result.get("success") else "error",
+                "agentic": {
+                    "iterations": result.get("iterations", 0),
+                    "tool_calls": result.get("tool_calls_made", []),
+                },
+            }
+        except Exception as e:
+            return {"agent": self.name, "query": query, "error": str(e), "status": "error"}
+
+    def chat(
+        self,
+        message: str,
+        conversation_history: Optional[List[Dict]] = None,
+        context: Optional[Dict] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        system_prompt_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Chat with the agent using tool-calling engine. Zero direct DB access."""
+        if not self.llm:
+            return {"status": "error", "response": "LLM provider not initialized", "context": context or {}}
+
+        if not self.tool_calling_engine:
+            return {"status": "error", "response": "No tool-calling engine configured",
+                    "context": context or {}}
+
+        try:
+            system_prompt = system_prompt_override or f"""{self.role_description}
+
+You do NOT have direct database access. Use tools to find data:
+- search_own_database: Search your own database for matching records
+- query_agent: Search other agents' databases for cross-references
+- expand_name_variations: Expand Arabic name variations before searching
+- extract_entities: Extract phones/emails/names from text
+
+IMPORTANT RESPONSE RULES:
+- Answer the user's question using ONLY data retrieved through tools.
+- Include ALL details from every matching record: dates, locations, names,
+  phone numbers, companions, document numbers, and any other fields present.
+- Do NOT summarize or abbreviate. List every record individually with full details.
+- If the tool returns 10 records, your answer must include details from all 10.
+- Present data in a structured format (record by record) so nothing is lost.
+- When done, use attempt_completion with your COMPLETE answer.
+"""
+            # Include conversation history in user message
+            history_text = ""
+            if conversation_history:
+                for msg in conversation_history[-5:]:
+                    history_text += f"\n{msg['role']}: {msg['content']}"
+
+            user_msg = f"{history_text}\nuser: {message}" if history_text else message
+
+            result = self.tool_calling_engine.run(
+                system_prompt=system_prompt,
+                user_message=user_msg,
+                temperature=temperature or 0.3,
+                max_tokens=max_tokens or 8000,
+                provider=provider,
+                model=model,
+                auto_complete_large_results=True,
+            )
+
+            answer = result.get("result", "No answer generated")
+            new_context = self._extract_context(message, answer, context or {})
+
+            return {
+                "status": "success" if result.get("success") else "error",
+                "response": answer,
+                "context": new_context, "agent": self.name,
+                "tool_calls": result.get("tool_calls_made", []),
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e),
+                    "response": f"An error occurred: {str(e)}", "context": context or {}}
+
+    def _build_tool_descriptions(self) -> str:
+        """Build a description of available tools for the system prompt."""
+        tools = self.get_available_tools()
+        if not tools:
+            return ""
+        lines = ["\nAvailable Tools:"]
+        for name, tool in tools.items():
+            lines.append(f"- {name}: {tool.description}")
+        return "\n".join(lines)
+
+    def _build_search_description(self, query: Dict[str, Any]) -> str:
+        """Build a human-readable search description from query identifiers."""
+        if isinstance(query, str):
+            return query
+
+        lines = []
+        if query.get("first_name"):
+            name_fields = [
+                ("first_name", "first_name_variations", "First name"),
+                ("father_name", "father_name_variations", "Father name"),
+                ("third_name", "third_name_variations", "Third name"),
+                ("fourth_name", "fourth_name_variations", "Fourth/Tribe name"),
+            ]
+            for base_field, var_field, label in name_fields:
+                base = query.get(base_field, "")
+                if not base:
+                    continue
+                var_str = query.get(var_field, "")
+                all_names = [base]
+                if var_str:
+                    all_names.extend([v.strip() for v in var_str.split(",") if v.strip()])
+                lines.append(f"  {label} (any of): {', '.join(all_names)}")
+
+            for field, label in [("native_name", "Native name"), ("kunya", "Kunya"),
+                                 ("aliases", "Aliases"), ("phone", "Phone"),
+                                 ("email", "Email"), ("passport", "Passport")]:
+                val = query.get(field, "")
+                if val:
+                    lines.append(f"  {label}: {val}")
+
+        elif query.get("name"):
+            lines.append(f"  Name: {query['name']}")
+        elif query.get("query"):
+            lines.append(f"  Query: {query['query']}")
+        elif query.get("identifier"):
+            lines.append(f"  Identifier: {query['identifier']}")
+
+        if not lines:
+            # Fallback: show all non-internal fields
+            display = {k: v for k, v in query.items() if not k.startswith("_") and v}
+            return json.dumps(display, indent=2, ensure_ascii=False)
+
+        return "Target:\n" + "\n".join(lines)
+
+    def _extract_context(self, user_message: str, assistant_response: str, current_context: Dict) -> Dict:
+        context = current_context.copy()
+        combined = user_message + " " + assistant_response
+
+        phones = re.findall(r"\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}", combined)
+        if phones:
+            context["phones"] = list(set(context.get("phones", []) + phones))
+
+        names = re.findall(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", combined)
+        if names:
+            context["names"] = list(set(context.get("names", []) + names))
+
+        dates = re.findall(r"\d{4}-\d{2}-\d{2}", combined)
+        if dates:
+            context["dates"] = list(set(context.get("dates", []) + dates))
+
+        emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", combined)
+        if emails:
+            context["emails"] = list(set(context.get("emails", []) + emails))
+
+        ips = re.findall(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", combined)
+        if ips:
+            context["ip_addresses"] = list(set(context.get("ip_addresses", []) + ips))
+
+        # Arabic text detection
+        arabic = re.findall(r"[\u0600-\u06FF]+(?:\s[\u0600-\u06FF]+)*", combined)
+        if arabic:
+            context["arabic_names"] = list(set(context.get("arabic_names", []) + arabic))
+
+        return context
+
+
+========================================
+FILE: agents/travel_agent.py
+========================================
+"""V2 Travel Agent - Enhanced travel pattern analysis."""
+
+from typing import Dict, Any, List, Optional
+from .base_agent import BaseAgent
+
+
+class TravelAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are an Enhanced Travel Agent AI assistant. Your role is to:
+1. Search travel records for specific individuals by name, passport, or phone
+2. Find travel patterns and co-travelers
+3. Identify frequent travel companions (3+ trips together)
+4. Analyze travel dates, destinations, and flight information
+5. Detect risk indicators: frequent travel to high-risk countries,
+   unusual patterns (cash purchases, last-minute bookings)
+6. Analyze visa applications and airline manifests
+7. Perform route analysis to identify suspicious travel corridors
+
+When searching, provide:
+- All trips taken by the person with dates and destinations
+- Co-travelers on each trip
+- Frequent travel companions (3+ trips together)
+- Risk indicators and suspicious patterns
+- Visa and immigration data if available
+"""
+        super().__init__("Travel Agent", db_path, role_description, llm)
+
+    def find_co_travelers(self, identifier: str, min_trips: int = 3) -> Dict[str, Any]:
+        query = {"action": "find_co_travelers", "identifier": identifier, "min_trips": min_trips}
+        prompt = f"""Analyze the travel database and find all co-travelers for: {identifier}
+
+Requirements:
+1. List all trips taken by this person
+2. For each trip, list all co-travelers
+3. Count how many times each co-traveler appeared
+4. Highlight co-travelers with {min_trips}+ trips together
+5. Provide dates and destinations for frequent companions
+6. Flag any risk indicators
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def search_travel_history(self, **kwargs) -> Dict[str, Any]:
+        return self.search(kwargs)
+
+    def analyze_travel_patterns(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "analyze_patterns", "identifier": identifier}
+        prompt = f"""Analyze travel patterns for: {identifier}
+
+Provide:
+1. Frequency of travel (monthly/yearly)
+2. Most visited destinations
+3. Average trip duration
+4. Booking patterns (advance vs last-minute)
+5. Payment methods used
+6. Seasonal patterns
+7. Risk assessment based on destinations
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/meta_data_agent.py
+========================================
+"""V2 Meta Data Agent - IP, device, and metadata analysis."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class MetaDataAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Meta Data Agent AI assistant. Your role is to:
+1. Analyze IP addresses and their locations
+2. Track device information and ISP data
+3. Monitor WhatsApp metadata (last seen, status)
+4. Analyze email metadata (IP, device, location)
+5. Track location history and GPS coordinates
+6. Identify patterns in metadata
+7. Build digital footprint maps from metadata
+
+When searching, provide:
+- IP address history with locations and ISPs
+- Device information used
+- WhatsApp activity patterns
+- Email metadata analysis
+- Location tracking history
+"""
+        super().__init__("Meta Data Agent", db_path, role_description, llm)
+
+    def analyze_metadata(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "analyze_metadata", "identifier": identifier}
+        prompt = f"""Analyze all metadata for: {identifier}
+
+Provide:
+1. All IP addresses used with locations and dates
+2. ISP information
+3. Device information
+4. WhatsApp metadata (last seen, status)
+5. Email metadata
+6. Location history with timeline
+7. Patterns or anomalies
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/osint_agent.py
+========================================
+"""V2 OSINT Agent - Open Source Intelligence gathering from public sources."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class OSINTAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are an Open Source Intelligence (OSINT) Agent. Your role is to:
+1. Search social media platforms (LinkedIn, Twitter/X, Facebook, Instagram, TikTok, Reddit)
+2. Analyze public profiles and online presence across all platforms
+3. Search WHOIS records for domain ownership
+4. Search public records, court filings, and business registrations
+5. Analyze news articles, press releases, and media mentions
+6. Search forums, blogs, and community posts
+7. Reverse phone number lookups and email lookups
+8. Search breach databases for exposed credentials
+9. Analyze public photos and metadata (EXIF data)
+10. Search Shodan/Censys for exposed devices and services
+11. Search paste sites (Pastebin, etc.) for leaked data
+12. Analyze GitHub/GitLab for code and configuration leaks
+13. Search job postings and professional networks
+14. Analyze public financial records and company filings
+15. Search archived web pages (Wayback Machine)
+
+OSINT Tools Available:
+- Social Media Scanner: LinkedIn, Twitter/X, Facebook, Instagram, TikTok, Reddit
+- WHOIS Lookup: Domain registration and ownership
+- Reverse Phone Lookup: Carrier, location, associated accounts
+- Reverse Email Lookup: Associated accounts and breaches
+- Public Records Search: Court filings, property, business registrations
+- News & Media Search: Articles, press releases, mentions
+- Breach Database Check: Known data breaches and exposed credentials
+- Code Repository Search: GitHub, GitLab public repos
+- Web Archive Search: Historical web presence
+- Image Analysis: Reverse image search, EXIF metadata
+
+When searching, provide:
+- All social media profiles found with links
+- Professional background from LinkedIn/similar
+- Public reputation from news and forums
+- Domain ownership and web presence
+- Any exposed data from breaches or leaks
+- Connections and relationships found online
+- Risk indicators from public information
+- Comprehensive digital footprint assessment
+"""
+        super().__init__("OSINT Agent", db_path, role_description, llm)
+
+    def investigate_target(self, identifier: str) -> Dict[str, Any]:
+        """Full OSINT investigation on a target."""
+        query = {"action": "full_osint", "identifier": identifier}
+        prompt = f"""Conduct a comprehensive OSINT investigation for: {identifier}
+
+Search across ALL available sources:
+1. Social media profiles (LinkedIn, Twitter, Facebook, Instagram, etc.)
+2. WHOIS and domain records
+3. Public records and court filings
+4. News articles and media mentions
+5. Forum posts and community mentions
+6. Breach databases
+7. Code repositories
+8. Professional networks
+9. Reverse phone/email lookups
+10. Web archives
+
+Database:
+{self.database_content}
+
+Provide a complete OSINT report organized by source type."""
+        return self._agent_search(prompt, query)
+
+    def social_media_scan(self, identifier: str) -> Dict[str, Any]:
+        """Scan all social media platforms for a target."""
+        query = {"action": "social_media_scan", "identifier": identifier}
+        prompt = f"""Scan all social media platforms for: {identifier}
+
+Check: LinkedIn, Twitter/X, Facebook, Instagram, TikTok, Reddit,
+Telegram, WhatsApp, YouTube, GitHub, and any other platforms.
+
+For each platform found, provide:
+- Profile URL
+- Username/handle
+- Activity level
+- Key content and posts
+- Connections visible
+- Account creation date if available
+
+Database:
+{self.database_content}"""
+        return self._agent_search(prompt, query)
+
+    def reverse_lookup(self, identifier: str) -> Dict[str, Any]:
+        """Reverse phone/email lookup."""
+        query = {"action": "reverse_lookup", "identifier": identifier}
+        prompt = f"""Perform reverse lookup for: {identifier}
+
+If phone number: Find carrier, location, associated accounts, social media
+If email: Find associated accounts, breaches, social media profiles
+If username: Find all platforms using this handle
+
+Database:
+{self.database_content}"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/intel_reports_agent.py
+========================================
+"""V2 Intelligence Reports Agent - Structured/unstructured intelligence analysis."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class IntelReportsAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are an Intelligence Reports Agent. Your role is to:
+1. Search and analyze structured/unstructured intelligence reports
+2. Query document databases for full-text search
+3. Search case files in case management systems
+4. Parse and extract entities from intelligence reports
+5. Cross-reference subjects to find connections
+6. Generate consolidated intelligence briefs and summaries
+
+When searching, provide:
+- Relevant intelligence reports with dates and sources
+- Entity extraction (people, places, organizations, events)
+- Cross-references between subjects
+- Confidence levels for each finding
+- Source attribution for all information
+- Consolidated intelligence summary
+"""
+        super().__init__("Intel Reports Agent", db_path, role_description, llm)
+
+    def query_reports(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "query_reports", "identifier": identifier}
+        prompt = f"""Search all intelligence reports for: {identifier}
+
+Provide:
+1. All matching intelligence reports
+2. Entity extraction from reports
+3. Cross-references with other subjects
+4. Timeline of intelligence events
+5. Confidence assessment
+6. Consolidated brief
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def generate_intelligence_summary(self, identifiers: Dict) -> Dict[str, Any]:
+        query = {"action": "generate_summary", **identifiers}
+        prompt = f"""Generate a consolidated intelligence brief for: {identifiers}
+
+Include:
+1. Executive summary of all findings
+2. Key entities and relationships
+3. Timeline of significant events
+4. Risk assessment
+5. Recommended follow-up actions
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/sigint_agent.py
+========================================
+"""V2 SIGINT Agent - Signals intelligence and CDR analysis."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class SIGINTAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a SIGINT (Signals Intelligence) Agent. Your role is to:
+1. Analyze call detail records (CDR) for communication patterns
+2. Perform frequency and timing analysis on communications
+3. Extract high-frequency contacts and key network nodes
+4. Correlate geolocation data from cell towers
+5. Build communication network topology maps
+6. Detect anomalous communication patterns
+7. Perform temporal analysis of pattern changes over time
+8. Assess network centrality to identify key players
+
+When searching, provide:
+- CDR analysis with call patterns
+- Communication frequency maps
+- Geolocation correlations
+- Network topology insights
+- Anomaly detection results
+- Temporal pattern changes
+"""
+        super().__init__("SIGINT Agent", db_path, role_description, llm)
+
+    def analyze_cdr(self, phone_number: str) -> Dict[str, Any]:
+        query = {"action": "analyze_cdr", "phone": phone_number}
+        prompt = f"""Analyze all signals intelligence for: {phone_number}
+
+Provide:
+1. Call detail record analysis
+2. Communication pattern frequency
+3. Top contacts and network nodes
+4. Cell tower / geolocation data
+5. Network topology assessment
+6. Anomalies detected
+7. Temporal changes in patterns
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/fisa_agent.py
+========================================
+"""V2 FISA Agent - Metadata analysis and digital surveillance."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class FISAAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a FISA (Foreign Intelligence Surveillance) Agent. Your role is to:
+1. Search and analyze FISA-authorized surveillance data
+2. Extract patterns from digital metadata
+3. Perform GPS and cell tower location analysis
+4. Build social connection graphs
+5. Identify behavioral patterns, routines, and anomalies
+6. Map comprehensive digital footprints and online presence
+
+When searching, provide:
+- Surveillance data findings
+- Metadata pattern analysis
+- Location tracking results
+- Social graph connections
+- Behavioral pattern assessment
+- Digital footprint map
+"""
+        super().__init__("FISA Agent", db_path, role_description, llm)
+
+    def analyze_surveillance(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "analyze_surveillance", "identifier": identifier}
+        prompt = f"""Analyze all FISA-related data for: {identifier}
+
+Provide:
+1. Surveillance data summary
+2. Digital metadata patterns
+3. Location tracking history
+4. Social graph connections
+5. Behavioral patterns and routines
+6. Anomalies detected
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/cne_agent.py
+========================================
+"""V2 CNE Agent - Computer Network Exploitation / Digital Forensics."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class CNEAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a CNE (Computer Network Exploitation) Agent. Your role is to:
+1. Parse mobile device extractions (Cellebrite/XRY data)
+2. Analyze chat messages from WhatsApp, Telegram, Signal
+3. Perform email forensics and pattern analysis
+4. Analyze image/video metadata and content
+5. Cross-platform contact matching and correlation
+6. Reconstruct digital activity timelines
+7. Assess encryption usage in communications
+8. Analyze application usage patterns
+
+Supported data sources:
+- Mobile device extractions (iOS/Android)
+- Computer hard drive images
+- Cloud storage dumps (iCloud, Google Drive)
+- Social media data exports
+- Email server dumps
+
+When searching, provide:
+- Device extraction findings
+- Chat message analysis
+- Email forensics results
+- Media metadata analysis
+- Cross-platform correlations
+- Activity timeline reconstruction
+"""
+        super().__init__("CNE Agent", db_path, role_description, llm)
+
+    def analyze_device_data(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "analyze_device", "identifier": identifier}
+        prompt = f"""Analyze all CNE/digital forensics data for: {identifier}
+
+Provide:
+1. Device extraction summary
+2. Chat message analysis (all platforms)
+3. Email forensics findings
+4. Media metadata analysis
+5. Cross-platform contact correlations
+6. Digital activity timeline
+7. Encryption assessment
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/access_agent.py
+========================================
+"""V2 Access Agent - Evaluate target's access to information of interest."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class AccessAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are an Access Agent for targeting assessment. Your role is to:
+1. Evaluate a subject's access to information of interest
+2. Analyze relationships to high-value targets
+3. Verify security clearance levels
+4. Analyze work relationships and organizational access
+5. Evaluate financial system access
+
+When searching, provide:
+- Information access level assessment
+- Relationship mapping to targets of interest
+- Security clearance verification
+- Employment and organizational analysis
+- Financial access evaluation
+- Overall access score and assessment
+"""
+        super().__init__("Access Agent", db_path, role_description, llm)
+
+    def assess_access(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "assess_access", "identifier": identifier}
+        prompt = f"""Evaluate access levels for subject: {identifier}
+
+Assess:
+1. Information access levels
+2. Relationships to high-value targets
+3. Security clearance status
+4. Employment and organizational position
+5. Financial system access
+6. Overall access assessment score
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/accessibility_agent.py
+========================================
+"""V2 Accessibility Agent - Physical and digital accessibility for targeting."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class AccessibilityAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are an Accessibility Agent for targeting assessment. Your role is to:
+1. Analyze location patterns to identify routine locations and times
+2. Predict travel patterns based on historical data
+3. Assess online presence and digital contact methods
+4. Identify social gathering locations and venues
+5. Evaluate personal security measures
+
+When searching, provide:
+- Location pattern analysis with routine identification
+- Travel prediction based on patterns
+- Digital accessibility assessment
+- Social venue analysis
+- Security posture evaluation
+"""
+        super().__init__("Accessibility Agent", db_path, role_description, llm)
+
+    def assess_accessibility(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "assess_accessibility", "identifier": identifier}
+        prompt = f"""Assess accessibility for subject: {identifier}
+
+Analyze:
+1. Routine locations and times
+2. Travel pattern predictions
+3. Online presence and contact methods
+4. Social gathering locations
+5. Personal security measures
+6. Overall accessibility assessment
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/motivation_agent.py
+========================================
+"""V2 Motivation & Vulnerabilities Agent - Identify leverage points."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class MotivationAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Motivation & Vulnerabilities Agent. Your role is to:
+1. Analyze financial pressures and stress indicators
+2. Assess emotional state from communications
+3. Identify family-related pressures and dependencies
+4. Detect career frustration and work complaints
+5. Identify medical/health concerns
+6. Assess lifestyle and spending patterns
+7. Detect grievances against organizations
+
+When searching, provide:
+- Financial stress analysis
+- Sentiment assessment from communications
+- Family dependency analysis
+- Career satisfaction indicators
+- Health concern identification
+- Lifestyle analysis
+- Grievance detection
+- Overall motivation profile
+"""
+        super().__init__("Motivation Agent", db_path, role_description, llm)
+
+    def analyze_motivations(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "analyze_motivations", "identifier": identifier}
+        prompt = f"""Analyze motivations and vulnerabilities for: {identifier}
+
+Assess:
+1. Financial pressures and stress
+2. Emotional state from communications
+3. Family dependencies and pressures
+4. Career frustration indicators
+5. Health concerns
+6. Lifestyle and spending patterns
+7. Grievances against organizations
+8. Overall motivation profile
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/suitability_agent.py
+========================================
+"""V2 Suitability Agent - Assess recruitment suitability and risk."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class SuitabilityAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Suitability Agent for targeting assessment. Your role is to:
+1. Calculate recruitment risk scores
+2. Assess historical reliability indicators
+3. Evaluate counter-intelligence risks
+4. Provide basic psychological profiling
+5. Evaluate operational security capabilities
+
+When searching, provide:
+- Risk assessment score and breakdown
+- Reliability indicators
+- Counter-intelligence risk evaluation
+- Psychological profile assessment
+- OPSEC capability evaluation
+- Overall suitability recommendation
+"""
+        super().__init__("Suitability Agent", db_path, role_description, llm)
+
+    def assess_suitability(self, identifier: str) -> Dict[str, Any]:
+        query = {"action": "assess_suitability", "identifier": identifier}
+        prompt = f"""Assess suitability for subject: {identifier}
+
+Evaluate:
+1. Risk assessment score
+2. Historical reliability
+3. Counter-intelligence risks
+4. Psychological profile
+5. Operational security capabilities
+6. Overall suitability recommendation
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/security_agent.py
+========================================
+"""V2 Security Agent - Officer safety and operational security assessment."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class SecurityAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Security Assessment Agent. Your role is to:
+1. Evaluate target's security profile for officer safety during potential meetings
+2. Assess counter-surveillance awareness - can the target detect surveillance?
+3. Identify physical security measures (bodyguards, cameras, weapons, dogs)
+4. Analyze digital security posture (encrypted comms, VPN usage, burner phones)
+5. Evaluate meeting safety - recommend safe locations, times, and cover stories
+6. Cross-reference with Access, Accessibility, and Motivation data for complete picture
+7. Flag any security warnings or red flags for field officers
+8. Assess the target's residence, vehicle, and routine security
+
+When analyzing, you MUST:
+- Always prioritize officer safety above all else
+- Cross-reference data from targeting agents (access, accessibility, motivation)
+- Provide specific, actionable security recommendations
+- Rate security risk levels: LOW, MODERATE, HIGH, CRITICAL
+- Include counter-surveillance indicators
+- Recommend approach strategies based on security profile
+- Flag weapons, military training, or law enforcement connections
+- Assess digital operational security (OPSEC) capabilities
+"""
+        super().__init__(
+            "Security Agent", db_path, role_description, llm,
+            agent_key="security",
+        )
+
+    def assess_security(self, identifier: str) -> Dict[str, Any]:
+        """Full security assessment for a target."""
+        query = {"action": "security_assessment", "identifier": identifier}
+        prompt = f"""Conduct a comprehensive security assessment for: {identifier}
+
+Provide:
+1. Overall security risk level (LOW/MODERATE/HIGH/CRITICAL)
+2. Counter-surveillance awareness assessment
+3. Physical security measures (weapons, cameras, dogs, bodyguards)
+4. Digital security posture (encryption, VPN, burner phones)
+5. Meeting safety recommendations (location, time, cover story)
+6. Vehicle and residence security details
+7. Known associates and their security postures
+8. Specific warnings for field officers
+9. Recommended approach strategy
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def officer_safety_brief(self, identifier: str) -> Dict[str, Any]:
+        """Quick officer safety brief for pre-meeting preparation."""
+        query = {"action": "safety_brief", "identifier": identifier}
+        prompt = f"""Generate a concise officer safety brief for meeting with: {identifier}
+
+Include ONLY critical safety information:
+1. Known weapons or combat training
+2. Counter-surveillance capability
+3. Recommended meeting location and time
+4. Cover story suggestion
+5. Emergency indicators (what to watch for)
+6. Communication security (is target likely recording?)
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/counter_intel_agent.py
+========================================
+"""V2 Counter Intelligence Agent - Double agent detection and CI risk assessment."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class CounterIntelAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Counter Intelligence (CI) Agent. Your role is to:
+1. Assess the possibility that a target is a double agent or working for a foreign intelligence service
+2. Identify indicators of deception, fabrication, or hostile intelligence affiliation
+3. Analyze financial anomalies that suggest foreign intelligence payment
+4. Evaluate communication patterns for intelligence tradecraft indicators
+5. Cross-reference with SIGINT, Travel, and Intel Reports for pattern correlation
+6. Assess loyalty indicators and polygraph reliability
+7. Identify operational security behaviors that suggest intelligence training
+8. Flag red flags: dead drops, counter-surveillance routes, encrypted comms, foreign contacts
+
+When analyzing, you MUST:
+- Always assume adversarial intent until proven otherwise (CI mindset)
+- Cross-reference data from intelligence agents (travel, sigint, intel_reports, fisa, cne)
+- Cross-reference data from targeting agents (access, accessibility, motivation, suitability)
+- Look for patterns that indicate intelligence tradecraft
+- Identify unexplained financial activity or income
+- Flag contacts with known or suspected intelligence officers
+- Assess encryption usage in context (legitimate privacy vs. operational security)
+- Rate CI risk: LOW, MODERATE, HIGH, CRITICAL
+- Provide specific double agent indicators with confidence levels
+- Recommend CI mitigation measures
+"""
+        super().__init__(
+            "Counter Intelligence Agent", db_path, role_description, llm,
+            agent_key="counter_intel",
+        )
+
+    def assess_ci_risk(self, identifier: str) -> Dict[str, Any]:
+        """Full counter-intelligence risk assessment."""
+        query = {"action": "ci_assessment", "identifier": identifier}
+        prompt = f"""Conduct a comprehensive counter-intelligence assessment for: {identifier}
+
+Provide:
+1. Overall CI risk level (LOW/MODERATE/HIGH/CRITICAL)
+2. Double agent indicators (list each with confidence level)
+3. Financial anomalies analysis
+4. Communication pattern analysis (tradecraft indicators)
+5. Foreign contact assessment
+6. Deception indicators from interviews/meetings
+7. Loyalty assessment with supporting evidence
+8. Operational security behaviors observed
+9. Polygraph/testing recommendations
+10. CI mitigation measures and recommendations
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def double_agent_analysis(self, identifier: str) -> Dict[str, Any]:
+        """Focused analysis on double agent probability."""
+        query = {"action": "double_agent_analysis", "identifier": identifier}
+        prompt = f"""Analyze the probability that this target is a double agent: {identifier}
+
+Focus specifically on:
+1. Evidence FOR double agent hypothesis (indicators, patterns, anomalies)
+2. Evidence AGAINST double agent hypothesis (counter-indicators)
+3. Alternative explanations for suspicious activity
+4. Probability assessment (0-100%) with reasoning
+5. Key unknowns that need investigation
+6. Recommended investigative actions
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/geoint_agent.py
+========================================
+"""V2 GEOINT Agent - Geospatial intelligence and location analysis."""
+
+from typing import Dict, Any, List
+from .base_agent import BaseAgent
+
+
+class GEOINTAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a GEOINT (Geospatial Intelligence) Agent. Your role is to:
+1. Identify ALL locations associated with a target - addresses, GPS coordinates, MGRS grids
+2. Cross-reference location data from multiple sources:
+   - SIGINT: Cell tower locations and triangulation data
+   - CNE: EXIF/GPS data from device extractions, browser location history
+   - FISA: IP addresses that can be geolocated to physical locations
+   - Meta Data: IP logs with geolocation data
+   - Travel: Airport/flight records showing cities visited
+   - Accessibility: GPS tracking data, venue assessments, daily routines
+3. Detect co-location events where multiple targets were at the same place simultaneously
+4. Map movement corridors and pattern-of-life analysis geographically
+5. Correlate IP addresses to physical locations via geolocation databases
+6. Identify locations of operational significance (meeting venues, safe houses, dead drops)
+7. Assess facilities for surveillance feasibility and approach planning
+8. Provide Arabic location names alongside English equivalents
+
+When analyzing, you MUST:
+- Always include GPS coordinates (decimal degrees) for every location mentioned
+- Include MGRS grid references where available for military-style reporting
+- Cross-reference location data across ALL available databases
+- Identify patterns: recurring locations, travel corridors, meeting points
+- Flag co-location events between targets with timestamps
+- Assess each location for operational significance (meeting venue, safe house, transit point)
+- Note counter-surveillance considerations at each location
+- Include Arabic place names (بغداد، عمان، لندن) alongside English
+- Distinguish between confirmed locations (direct observation/SIGINT) and assessed locations (derived/approximate)
+- Rate location confidence: CONFIRMED, PROBABLE, POSSIBLE, APPROXIMATE
+"""
+        super().__init__(
+            "GEOINT Agent", db_path, role_description, llm,
+            agent_key="geoint",
+        )
+
+    def analyze_locations(self, identifier: str) -> Dict[str, Any]:
+        """Find all locations associated with a target."""
+        query = {"action": "location_analysis", "identifier": identifier}
+        prompt = f"""Conduct a comprehensive geospatial analysis for: {identifier}
+
+Provide:
+1. All known locations associated with this target (residences, workplaces, meeting venues)
+2. GPS coordinates and MGRS grids for each location
+3. Location classification (residence, workplace, meeting venue, transit point, safe house)
+4. Confidence level for each location (CONFIRMED/PROBABLE/POSSIBLE/APPROXIMATE)
+5. Cell tower and IP geolocation data that confirms presence at locations
+6. Co-location events with other targets at same locations
+7. Movement corridors between key locations
+8. Facilities assessment for operationally significant locations
+9. Arabic addresses and location names where applicable
+10. Cross-references to other databases (SIGINT, CNE, FISA, Travel, etc.)
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def colocation_analysis(self, identifiers: List[str]) -> Dict[str, Any]:
+        """Find where multiple targets were at the same place/time."""
+        id_str = ", ".join(identifiers)
+        query = {"action": "colocation_analysis", "identifiers": identifiers}
+        prompt = f"""Analyze co-location events for these subjects: {id_str}
+
+Find ALL instances where two or more of these subjects were at the same location
+at the same time. For each co-location event provide:
+1. Date, time window, and duration
+2. Location with GPS coordinates
+3. How presence was confirmed (SIGINT, GPS, hotel records, OSINT, etc.)
+4. Assessment of whether the meeting was likely planned or coincidental
+5. Operational significance rating (LOW/MEDIUM/HIGH/CRITICAL)
+6. Cross-references to supporting intelligence
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def movement_pattern_analysis(self, identifier: str) -> Dict[str, Any]:
+        """Analyze movement corridors and pattern-of-life."""
+        query = {"action": "movement_analysis", "identifier": identifier}
+        prompt = f"""Analyze movement patterns and corridors for: {identifier}
+
+Provide:
+1. Daily movement corridors with GPS waypoints
+2. Routine patterns (predictable times, routes, locations)
+3. International travel corridors (city-to-city patterns)
+4. Deviations from normal patterns and their dates
+5. Best times/locations for approach based on pattern analysis
+6. Counter-surveillance awareness indicators in movement
+7. Vehicle and transportation modes used
+8. Comparison with associates' movement patterns for correlation
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query, "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/pattern_of_life_agent.py
+========================================
+"""V2 Pattern of Life Agent - Analyzes target behavioral patterns and routines."""
+
+from typing import Dict, Any
+from .base_agent import BaseAgent
+
+
+class PatternOfLifeAgent(BaseAgent):
+    def __init__(self, db_path: str, llm=None):
+        role_description = """You are a Pattern of Life Agent for targeting assessment. Your role is to:
+1. Identify the target's home location and frequent residences
+2. Map frequent places visited (work, mosques, markets, cafes, gyms)
+3. Track frequent IP addresses and WiFi network connections
+4. Identify daily routines (wake time, commute, work hours, evening activities)
+5. Identify weekly patterns (Friday prayers, weekend activities, regular meetings)
+6. Identify seasonal patterns (travel during holidays, summer/winter routines)
+7. Note anything unique about the person's habits or behaviors
+8. Cross-reference with SIGINT for call time patterns
+9. Cross-reference with Travel for route patterns
+10. Cross-reference with GEOINT for location patterns
+11. Cross-reference with FISA for surveillance data patterns
+12. Cross-reference with CNE for device usage patterns
+
+When searching, provide:
+- Home and work locations with times present
+- Frequent location analysis with visit frequency and duration
+- Daily schedule reconstruction
+- Weekly and monthly pattern analysis
+- IP/WiFi connection patterns and what they reveal about locations
+- Device usage patterns (when devices are on/off, app usage times)
+- Anomalies or deviations from established patterns
+- Best times/locations for surveillance or approach
+- Predictability assessment (how predictable is this person's routine?)
+"""
+        super().__init__(
+            "Pattern of Life Agent", db_path, role_description, llm,
+            agent_key="pattern_of_life",
+        )
+
+    def analyze_patterns(self, identifier: str) -> Dict[str, Any]:
+        """Comprehensive pattern of life analysis."""
+        query = {"action": "pattern_analysis", "identifier": identifier}
+        prompt = f"""Conduct a comprehensive pattern of life analysis for: {identifier}
+
+Analyze:
+1. Home location and frequent residences
+2. Workplace and work schedule
+3. Frequent places (with visit frequency and typical times)
+4. Daily routine reconstruction (hour by hour if possible)
+5. Weekly patterns (day by day)
+6. Seasonal or monthly patterns
+7. IP addresses and WiFi networks used (what they reveal)
+8. Device usage patterns
+9. Unique habits or behaviors
+10. Predictability assessment
+11. Best surveillance windows
+12. Pattern anomalies and their significance
+
+Database:
+{self.database_content}
+"""
+        return self._agent_search(prompt, query)
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query,
+                    "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/sna_agent.py
+========================================
+"""V2 Social Network Analysis Agent — builds connection graphs from intelligence data.
+
+Unlike other agents, SNA doesn't have its own database.
+It uses tools to gather contacts from other agents' data, then
+builds and analyzes the social network graph.
+"""
+
+from typing import Dict, Any, List, Optional
+from .base_agent import BaseAgent
+
+
+class SocialNetworkAgent(BaseAgent):
+    """Social Network Analysis Agent — 15th agent.
+
+    Builds social network graphs from:
+    - CDR contacts (phone calls, SMS)
+    - Travel co-travelers
+    - FISA collection contacts
+    - Cross-database mentions (secondary search)
+
+    Tools:
+    - build_network: Construct adjacency graph
+    - analyze_network: Compute centrality, clusters, key connections
+    """
+
+    def __init__(self, db_path: str = "", llm=None):
+        role_description = """You are a Social Network Analysis (SNA) Agent. Your role is to:
+1. Build social network graphs from communication records, travel data, and intelligence reports
+2. Identify key contacts and their relationship to the target
+3. Compute network centrality to find the most important nodes
+4. Detect clusters and sub-groups within the target's network
+5. Identify unknown contacts that warrant further investigation
+6. Assess network risk based on contact profiles
+7. Map connection types: phone calls, co-travel, financial links, meetings
+8. Provide actionable intelligence about the target's social circle
+
+When analyzing, provide:
+- Network graph with all contacts and connection types
+- Centrality scores showing relative importance of each contact
+- Cluster analysis showing sub-groups
+- Risk assessment for unknown or flagged contacts
+- Key connections sorted by significance
+- Recommendations for further investigation
+"""
+        super().__init__(
+            "Social Network Agent", db_path, role_description, llm,
+            agent_key="sna",
+        )
+
+    def analyze_full_network(self, target_phone: str = "",
+                             target_name: str = "",
+                             preprocessed: Dict = None,
+                             contact_intel: Dict = None) -> Dict[str, Any]:
+        """Build and analyze the complete social network.
+
+        Called by orchestrator during Phase 4 of create_target_card().
+
+        Args:
+            target_phone: Target's primary phone number
+            target_name: Target's name
+            preprocessed: Dict of {agent_key: preprocessed_data} from Phase 2
+            contact_intel: Output from ContactSearchTool (Phase 3)
+
+        Returns:
+            Combined network + analysis results
+        """
+        from tools.agent_specific.sna.build_network import BuildNetworkTool
+        from tools.agent_specific.sna.analyze_network import AnalyzeNetworkTool
+
+        preprocessed = preprocessed or {}
+        contact_intel_data = {}
+        if contact_intel and hasattr(contact_intel, "data"):
+            contact_intel_data = contact_intel.data.get("contact_intel", {})
+        elif isinstance(contact_intel, dict):
+            contact_intel_data = contact_intel.get("contact_intel", contact_intel)
+
+        # Extract contacts from preprocessed data
+        cdr_contacts = []
+        travel_contacts = []
+        fisa_contacts = []
+
+        # From SIGINT CDR data
+        sigint_data = preprocessed.get("sigint", {})
+        if hasattr(sigint_data, "data"):
+            sigint_data = sigint_data.data or {}
+        if isinstance(sigint_data, dict):
+            cdr_contacts = sigint_data.get("contact_list", [])
+
+        # From Travel data
+        travel_data = preprocessed.get("travel", {})
+        if hasattr(travel_data, "data"):
+            travel_data = travel_data.data or {}
+        if isinstance(travel_data, dict):
+            travel_contacts = travel_data.get("co_traveler_list", [])
+
+        # From FISA data
+        fisa_data = preprocessed.get("fisa", {})
+        if hasattr(fisa_data, "data"):
+            fisa_data = fisa_data.data or {}
+        if isinstance(fisa_data, dict):
+            fisa_contacts = fisa_data.get("all_contacts", [])
+
+        # Phase A: Build the network graph
+        builder = BuildNetworkTool()
+        build_result = builder.execute(
+            target_phone=target_phone,
+            target_name=target_name,
+            cdr_contacts=cdr_contacts,
+            travel_contacts=travel_contacts,
+            fisa_contacts=fisa_contacts,
+            contact_intel=contact_intel_data,
+        )
+
+        if not build_result.success:
+            return {
+                "status": "error",
+                "error": build_result.error,
+                "network": {"nodes": [], "edges": []},
+            }
+
+        network = build_result.data
+
+        # Phase B: Analyze the network
+        analyzer = AnalyzeNetworkTool()
+        analysis_result = analyzer.execute(network=network)
+
+        if not analysis_result.success:
+            return {
+                "status": "error",
+                "error": analysis_result.error,
+                "network": network,
+            }
+
+        analysis = analysis_result.data
+
+        return {
+            "status": "success",
+            "network": {
+                "nodes": network.get("nodes", []),
+                "edges": network.get("edges", []),
+                "total_nodes": network.get("total_nodes", 0),
+                "total_edges": network.get("total_edges", 0),
+            },
+            "analysis": {
+                "centrality_scores": analysis.get("centrality_scores", {}),
+                "clusters": analysis.get("clusters", []),
+                "key_connections": analysis.get("key_connections", []),
+                "risk_nodes": analysis.get("risk_nodes", []),
+                "network_summary": analysis.get("network_summary", ""),
+            },
+        }
+
+    def _agent_search(self, prompt: str, query: Dict) -> Dict[str, Any]:
+        if not self.llm:
+            return {"error": "LLM provider not initialized"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": self.role_description},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3, max_tokens=2000,
+            )
+            return {"agent": self.name, "query": query,
+                    "results": result["content"], "status": "success"}
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+========================================
+FILE: agents/unified_agent.py
+========================================
+"""V2 Unified Agent - Cross-database query agent with all 11 agent sources."""
+
+from typing import Dict, Any, List, Optional
+from .base_agent import BaseAgent
+
+
+class UnifiedAgent(BaseAgent):
+    def __init__(self, orchestrator, llm=None):
+        role_description = """You are a Unified Intelligence Agent with access to all databases:
+1. Travel Database - travel records, co-travelers, destinations
+2. Meta Data Database - IP addresses, locations, device info
+3. OSINT Database - open source intelligence, social media, public records
+4. Intel Reports Database - intelligence reports and case files
+5. SIGINT Database - signals intelligence, CDR, call records, SMS
+6. FISA Database - surveillance and metadata analysis
+7. CNE Database - digital forensics, device extractions, chat logs, emails
+8. Access Database - information access assessment
+9. Accessibility Database - physical/digital accessibility
+10. Motivation Database - motivations and vulnerabilities
+11. Suitability Database - recruitment suitability
+
+When asked for comprehensive information, search ALL relevant databases
+and provide a complete intelligence report."""
+        super().__init__("Unified Agent", "unified", role_description, llm)
+        self.orchestrator = orchestrator
+
+    def chat(self, message: str, conversation_history: Optional[List[Dict]] = None,
+             context: Optional[Dict] = None, **kwargs) -> Dict[str, Any]:
+        if not self.llm:
+            return {"status": "error", "response": "LLM not initialized", "context": context or {}}
+
+        agents_to_query = self._determine_agents(message)
+        all_data = {}
+        for agent_type in agents_to_query:
+            agent = self.orchestrator.agents.get(agent_type)
+            if agent and hasattr(agent, 'load_database'):
+                data = agent.load_database()
+                if data and "Error" not in data:
+                    all_data[agent_type] = data
+
+        if not all_data:
+            return {"status": "error", "response": "No agent databases accessible", "context": context or {}}
+
+        try:
+            system_prompt = f"""{self.role_description}\n\nYou have access to:\n"""
+            for agent_type, data in all_data.items():
+                system_prompt += f"\n=== {agent_type.upper()} DATABASE ===\n{data[:1500]}\n"
+            system_prompt += """\nInstructions:
+1. Search ALL databases for relevant information
+2. Specify which database each finding came from
+3. Organize response by category
+4. If some databases lack relevant info, mention briefly"""
+
+            messages = [{"role": "system", "content": system_prompt}]
+            if conversation_history:
+                for msg in conversation_history[-3:]:
+                    messages.append({"role": msg["role"], "content": msg["content"]})
+            messages.append({"role": "user", "content": message})
+
+            result = self.llm.chat(messages=messages, temperature=0.3, max_tokens=1500)
+            answer = result["content"]
+            new_context = self._extract_context(message, answer, context or {})
+
+            return {
+                "status": "success", "response": answer, "context": new_context,
+                "agent": self.name, "sources": list(all_data.keys()),
+            }
+        except Exception as e:
+            return {"status": "error", "response": f"Error: {str(e)}", "context": context or {}}
+
+    def _determine_agents(self, message: str) -> List[str]:
+        msg = message.lower()
+        keywords = {
+            "travel": ["travel", "trip", "flight", "destination", "co-traveler", "passport"],
+            "meta": ["ip", "location", "device", "metadata", "gps"],
+            "osint": ["osint", "social media", "linkedin", "twitter", "public", "reputation", "news", "whois", "breach"],
+            "intel_reports": ["intelligence", "report", "case", "brief"],
+            "sigint": ["sigint", "signal", "cdr", "call", "sms", "phone", "communication", "intercept"],
+            "fisa": ["fisa", "surveillance", "warrant"],
+            "cne": ["forensic", "extraction", "whatsapp", "telegram", "email", "purchase", "digital", "cne"],
+            "access": ["access", "clearance", "position"],
+            "accessibility": ["accessibility", "routine", "venue"],
+            "motivation": ["motivation", "vulnerability", "grievance", "financial"],
+            "suitability": ["suitability", "risk", "reliability", "recruit"],
+        }
+        if any(w in msg for w in ["all", "everything", "complete", "full", "comprehensive"]):
+            return list(keywords.keys())
+        agents = [a for a, words in keywords.items() if any(w in msg for w in words)]
+        return agents if agents else list(keywords.keys())
+
+
+========================================
+FILE: agents/chat_manager.py
+========================================
+"""V2 Chat Manager - Multi-session conversation management."""
+
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+
+
+class ChatManager:
+    def __init__(self):
+        self.conversations: Dict[str, Dict] = {}
+
+    def create_session(self, agent_type: str) -> str:
+        session_id = f"{agent_type}_{datetime.now().timestamp()}"
+        self.conversations[session_id] = {
+            "agent_type": agent_type,
+            "messages": [],
+            "context": {},
+            "created_at": datetime.now().isoformat(),
+        }
+        return session_id
+
+    def add_message(self, session_id: str, role: str, content: str, context: Optional[Dict] = None) -> bool:
+        if session_id not in self.conversations:
+            return False
+        message = {"role": role, "content": content, "timestamp": datetime.now().isoformat()}
+        if context:
+            message["context"] = context
+            self.conversations[session_id]["context"].update(context)
+        self.conversations[session_id]["messages"].append(message)
+        return True
+
+    def get_conversation(self, session_id: str) -> Optional[Dict]:
+        return self.conversations.get(session_id)
+
+    def get_context(self, session_id: str) -> Dict:
+        if session_id in self.conversations:
+            return self.conversations[session_id]["context"]
+        return {}
+
+    def get_recent_messages(self, session_id: str, count: int = 5) -> List[Dict]:
+        if session_id in self.conversations:
+            return self.conversations[session_id]["messages"][-count:]
+        return []
+
+    def list_sessions(self) -> List[Dict]:
+        return [
+            {"session_id": sid, "agent_type": data["agent_type"], "created_at": data["created_at"],
+             "message_count": len(data["messages"])}
+            for sid, data in self.conversations.items()
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        if session_id in self.conversations:
+            del self.conversations[session_id]
+            return True
+        return False
+
+
+========================================
+FILE: agents/orchestrator.py
+========================================
+"""V2 Orchestrator - Manages all 15 agents with LLM provider injection,
+cross-agent access, tool-calling engine, and 5-phase target card pipeline."""
+
+from typing import Dict, Any, List
+import re
+import json
+import os
+from datetime import datetime
+
+from .travel_agent import TravelAgent
+from .meta_data_agent import MetaDataAgent
+from .osint_agent import OSINTAgent
+from .intel_reports_agent import IntelReportsAgent
+from .sigint_agent import SIGINTAgent
+from .fisa_agent import FISAAgent
+from .cne_agent import CNEAgent
+from .access_agent import AccessAgent
+from .accessibility_agent import AccessibilityAgent
+from .motivation_agent import MotivationAgent
+from .suitability_agent import SuitabilityAgent
+from .security_agent import SecurityAgent
+from .counter_intel_agent import CounterIntelAgent
+from .geoint_agent import GEOINTAgent
+from .pattern_of_life_agent import PatternOfLifeAgent
+from .sna_agent import SocialNetworkAgent
+from config import Config
+from llm_provider import LLMProvider, LLMConfig
+
+
+class Orchestrator:
+    def __init__(self):
+        self.llm = self._create_llm_provider()
+        self.global_tools = self._init_global_tools()
+        self.agents = self._init_agents()
+        self._wire_tools_to_agents()
+        self._wire_cross_agent_access()
+        self._init_tool_calling_engines()
+        self.results = {}
+
+        # Per-target persistent storage
+        from tools.shared.target_store import TargetStore
+        self.target_store = TargetStore(db_path=Config.TARGET_STORE_DB_PATH)
+
+    def _create_llm_provider(self) -> LLMProvider:
+        configs = []
+
+        # Priority 1: Air-gapped / custom endpoint (single URL + API key)
+        if Config.LLM_BASE_URL and Config.LLM_API_KEY:
+            configs.append(LLMConfig(
+                provider=Config.LLM_PROVIDER or "openai",
+                api_key=Config.LLM_API_KEY,
+                model=Config.LLM_MODEL or Config.DEFAULT_MODEL,
+                base_url=Config.LLM_BASE_URL,
+                temperature=Config.TEMPERATURE,
+                max_tokens=Config.MAX_TOKENS,
+            ))
+            return LLMProvider(configs, timeout=Config.LLM_TIMEOUT_SECONDS)
+
+        # Priority 2: Multi-provider fallback
+        if Config.OPENAI_API_KEY:
+            configs.append(LLMConfig(
+                provider="openai", api_key=Config.OPENAI_API_KEY,
+                model=Config.DEFAULT_MODEL, temperature=Config.TEMPERATURE,
+                max_tokens=Config.MAX_TOKENS,
+            ))
+        if Config.ANTHROPIC_API_KEY:
+            configs.append(LLMConfig(
+                provider="anthropic", api_key=Config.ANTHROPIC_API_KEY,
+                model="claude-sonnet-4-20250514", temperature=Config.TEMPERATURE,
+                max_tokens=Config.MAX_TOKENS,
+            ))
+        if Config.GOOGLE_API_KEY:
+            configs.append(LLMConfig(
+                provider="google", api_key=Config.GOOGLE_API_KEY,
+                model="gemini-pro", temperature=Config.TEMPERATURE,
+                max_tokens=Config.MAX_TOKENS,
+            ))
+        if not configs:
+            configs.append(LLMConfig(provider="openai", api_key="", model="gpt-4o-mini"))
+        return LLMProvider(configs, timeout=Config.LLM_TIMEOUT_SECONDS)
+
+    def _init_global_tools(self) -> Dict:
+        """Initialize global tools available to ALL agents."""
+        from tools.shared.name_variation_generator import NameVariationGenerator
+        from tools.shared.voter_db_tool import VoterDatabaseTool
+        from tools.shared.large_data_processor import LargeDataProcessor
+        from tools.shared.results_store import ResultsStore
+        from tools.shared.sub_agent_processor import SubAgentProcessor
+        from tools.shared.agent_query_tool import AgentQueryTool
+
+        name_gen = NameVariationGenerator(llm=self.llm)
+        voter_db = VoterDatabaseTool(csv_path=Config.VOTER_CSV_PATH)
+        large_proc = LargeDataProcessor(llm=self.llm)
+
+        # Sub-Agent Processing system
+        self.results_store = ResultsStore(db_path=Config.RESULTS_DB_PATH)
+        sub_agent_proc = SubAgentProcessor(
+            llm=self.llm, results_store=self.results_store,
+        )
+
+        # Cross-agent query tool (agents reference set after _init_agents)
+        self.agent_query_tool = AgentQueryTool()
+
+        return {
+            "name_variation_generator": name_gen,
+            "voter_db_search": voter_db,
+            "large_data_processor": large_proc,
+            "sub_agent_processor": sub_agent_proc,
+            "agent_query": self.agent_query_tool,
+        }
+
+    def _wire_tools_to_agents(self):
+        """Give every agent access to global tools + their agent-specific tools."""
+        for agent_key, agent in self.agents.items():
+            agent_tools = self._load_agent_specific_tools(agent_key)
+            agent.set_tools(self.global_tools, agent_tools)
+
+    def _wire_cross_agent_access(self):
+        """Wire the AgentQueryTool with references to all agents.
+        This enables cross-agent database queries (e.g., Security Agent
+        querying Access Agent's data)."""
+        self.agent_query_tool.set_agents(self.agents)
+
+    def _init_tool_calling_engines(self):
+        """Initialize QCoder-style tool-calling engines for agents that need them.
+        CI/Security agents and targeting agents get engines with 7 cross-agent tools."""
+        from tools.shared.tool_calling_engine import ToolCallingEngine, ToolDefinition
+
+        # --- Tool 1: query_agent (cross-agent database query) ---
+        query_tool_def = ToolDefinition(
+            name="query_agent",
+            description=(
+                "Query another agent's database to get intelligence data.\n"
+                "Agent guide — use the right agent for each query type:\n"
+                "  travel: flights, airports, co-travelers, routes, visa, passport, trips\n"
+                "  meta: IP addresses, device metadata, browser fingerprints, locations from IPs\n"
+                "  osint: social media, LinkedIn, Twitter, Facebook, news, public records, WHOIS\n"
+                "  intel_reports: intelligence reports, case files, assessments, briefings\n"
+                "  sigint: phone calls, SMS, CDR, cell towers, IMSI, communications, intercepts\n"
+                "  fisa: surveillance, wiretaps, collection targets, FISA warrants\n"
+                "  cne: digital forensics, emails, chat logs, device extractions, keyloggers\n"
+                "  access: information access, clearances, employment, organizational position\n"
+                "  accessibility: physical location patterns, routines, venues, GPS tracking, daily schedule\n"
+                "  motivation: motivations, vulnerabilities, ideology, grievances, recruitment potential\n"
+                "  suitability: recruitment suitability, reliability, risk factors\n"
+                "  security: officer safety, counter-surveillance, bodyguards, weapons, OPSEC\n"
+                "  counter_intel: double agents, CI risk, deception indicators, loyalty concerns\n"
+                "  geoint: geospatial, coordinates, GPS, MGRS grids, maps, satellite imagery, "
+                "locations, geo-fencing, movement corridors, co-location\n"
+                "  pattern_of_life: daily routines, weekly patterns, home location, frequent places, "
+                "device patterns, WiFi, IP habits, seasonal behaviors, predictability"
+            ),
+            parameters=[
+                {"name": "agent_key", "required": True,
+                 "description": "Agent to query (e.g., 'travel', 'sigint', 'access', 'security', 'geoint')"},
+                {"name": "query", "required": True,
+                 "description": "Search query - name, phone, identifier, or question"},
+                {"name": "mode", "required": False,
+                 "description": "'database' for raw data search, 'analysis' for AI analysis (default: database)"},
+            ],
+            handler=self._handle_agent_query,
+        )
+
+        # --- Tool 3: expand_name_variations ---
+        expand_name_def = ToolDefinition(
+            name="expand_name_variations",
+            description="Generate all English and Arabic transliteration variations of a name. "
+                        "Arabic names have many English spellings (e.g. محمد → Mohammad, Mohammed, Muhammad). "
+                        "ALWAYS use this tool BEFORE searching databases with Arabic names.",
+            parameters=[
+                {"name": "name", "required": True,
+                 "description": "The name to expand (Arabic or English)"},
+            ],
+            handler=self._handle_expand_name,
+        )
+
+        # --- Tool 4: extract_entities ---
+        extract_entities_def = ToolDefinition(
+            name="extract_entities",
+            description="Extract phone numbers, emails, names, dates, and IP addresses from text. "
+                        "Use this to pull structured identifiers from unstructured intelligence data.",
+            parameters=[
+                {"name": "text", "required": True,
+                 "description": "Text content to extract entities from"},
+            ],
+            handler=self._handle_extract_entities,
+        )
+
+        # --- Tool 5: search_voter_database ---
+        search_voter_def = ToolDefinition(
+            name="search_voter_database",
+            description="Search Iraq voter registration database. Contains Arabic names, "
+                        "national IDs, cities, and family information. Names are in Arabic only - "
+                        "use expand_name_variations first to get Arabic equivalents.",
+            parameters=[
+                {"name": "name", "required": False,
+                 "description": "Name to search (Arabic preferred)"},
+                {"name": "phone", "required": False,
+                 "description": "Phone number"},
+                {"name": "city", "required": False,
+                 "description": "City name (Arabic or English)"},
+                {"name": "national_id", "required": False,
+                 "description": "National ID number"},
+            ],
+            handler=self._handle_voter_search,
+        )
+
+        # --- Tool 6: search_text_database ---
+        search_text_db_def = ToolDefinition(
+            name="search_text_database",
+            description="Search a specific text file database for records matching keywords. "
+                        "Use this to search database files beyond your own agent's database.",
+            parameters=[
+                {"name": "db_name", "required": True,
+                 "description": "Database name: travel, sigint, meta, osint, cne, fisa, "
+                                "intel_reports, access, accessibility, motivation, suitability, "
+                                "security, counter_intel, geoint, pattern_of_life"},
+                {"name": "query", "required": True,
+                 "description": "Search terms (keywords, names, phone numbers)"},
+            ],
+            handler=self._handle_text_db_search,
+        )
+
+        # --- Tool 7: analyze_with_llm ---
+        analyze_llm_def = ToolDefinition(
+            name="analyze_with_llm",
+            description="Send text to the AI for deeper analysis with a specific question. "
+                        "Use when you need to analyze complex data, cross-reference findings, "
+                        "or draw analytical conclusions from gathered intelligence.",
+            parameters=[
+                {"name": "text", "required": True,
+                 "description": "The text/data to analyze"},
+                {"name": "question", "required": True,
+                 "description": "Specific analytical question to answer about the text"},
+            ],
+            handler=self._handle_llm_analysis,
+        )
+
+        # ALL database agents get tool-calling engines (zero direct DB access)
+        engine_agents = [
+            "travel", "meta", "osint", "intel_reports",
+            "sigint", "fisa", "cne",
+            "access", "accessibility", "motivation", "suitability",
+            "security", "counter_intel", "geoint", "pattern_of_life",
+        ]
+
+        for agent_key in engine_agents:
+            agent = self.agents.get(agent_key)
+            if not agent:
+                continue
+
+            engine = ToolCallingEngine(
+                llm=self.llm,
+                max_iterations=Config.TOOL_CALLING_MAX_ITERATIONS,
+                max_mistakes=Config.TOOL_CALLING_MAX_MISTAKES,
+            )
+
+            # Register all 7 tools
+            engine.register_tool(query_tool_def)
+            engine.register_tool(expand_name_def)
+            engine.register_tool(extract_entities_def)
+            engine.register_tool(search_voter_def)
+            engine.register_tool(search_text_db_def)
+            engine.register_tool(analyze_llm_def)
+
+            # Register search_own_database with agent-specific handler
+            own_db_def = ToolDefinition(
+                name="search_own_database",
+                description="Search your own database for records matching a query",
+                parameters=[
+                    {"name": "query", "required": True,
+                     "description": "Search terms to find in your database"},
+                ],
+                handler=lambda query="", _agent=agent: self._handle_own_db_search(_agent, query),
+            )
+            engine.register_tool(own_db_def)
+
+            # Store engine on the agent for use in agentic_search()
+            agent.tool_calling_engine = engine
+
+    # --- Tool Handlers ---
+
+    def _tool_log(self, tool_name: str, msg: str):
+        """Log tool handler activity."""
+        print(f"  [TOOL:{tool_name}] {msg}")
+
+    def _handle_agent_query(self, agent_key: str = "", query: str = "",
+                            mode: str = "database") -> Dict:
+        """Handler for query_agent tool."""
+        self._tool_log("query_agent", f"Querying agent '{agent_key}' for '{query}' (mode={mode})")
+        result = self.agent_query_tool.execute(
+            agent_key=agent_key, query=query, mode=mode,
+        )
+        if result.success:
+            data = result.data
+            records_found = data.get("records_found", "?")
+            self._tool_log("query_agent", f"Found {records_found} records in {agent_key}")
+            return {"result": data.get("result", json.dumps(data, indent=2))}
+        self._tool_log("query_agent", f"ERROR: {result.error}")
+        return {"error": result.error}
+
+    def _handle_own_db_search(self, agent, query: str = "") -> Dict:
+        """Handler for search_own_database tool."""
+        self._tool_log("search_own_db", f"Searching own DB for '{query}'")
+        if not agent.database_content:
+            agent.database_content = agent.load_database()
+        db_content = agent.database_content
+        if not db_content or "empty" in db_content.lower():
+            self._tool_log("search_own_db", "Database is empty")
+            return {"result": "Database is empty."}
+
+        query_lower = query.lower()
+        terms = [t.strip() for t in query_lower.split() if len(t.strip()) > 2]
+        records = [r.strip() for r in db_content.split("\n\n") if r.strip()]
+        matching = [r for r in records if any(t in r.lower() for t in terms)]
+
+        self._tool_log("search_own_db", f"Found {len(matching)}/{len(records)} matching records")
+        if matching:
+            return {"result": "\n\n".join(matching)}
+        return {"result": f"No records matching '{query}' found."}
+
+    def _handle_expand_name(self, name: str = "") -> Dict:
+        """Handler for expand_name_variations tool."""
+        self._tool_log("expand_name", f"Expanding name: '{name}'")
+        name_gen = self.global_tools.get("name_variation_generator")
+        if not name_gen:
+            return {"error": "Name variation generator not available"}
+        result = name_gen.execute(name=name)
+        if result.success:
+            data = result.data
+            self._tool_log("expand_name", f"Generated {data['total_part_variations']} variations, {len(data['search_terms'])} search terms")
+            return {
+                "result": f"Name: {data['original_name']}\n"
+                          f"Variations found: {data['total_part_variations']}\n"
+                          f"Search terms: {', '.join(data['search_terms'])}\n"
+                          f"Full name variations: {', '.join(data['full_name_variations'][:20])}"
+            }
+        return {"error": result.error}
+
+    def _handle_extract_entities(self, text: str = "") -> Dict:
+        """Handler for extract_entities tool. Regex-based entity extraction."""
+        entities = {
+            "phones": list(set(re.findall(r'[\+]?[\d\-\(\)\s]{7,20}', text))),
+            "emails": list(set(re.findall(r'[\w\.\-]+@[\w\.\-]+\.\w+', text))),
+            "ips": list(set(re.findall(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', text))),
+            "dates": list(set(re.findall(r'\d{4}-\d{2}-\d{2}', text))),
+        }
+        # Clean phone numbers
+        entities["phones"] = [p.strip() for p in entities["phones"] if len(p.strip()) >= 7]
+        total = sum(len(v) for v in entities.values())
+        parts = []
+        for key, vals in entities.items():
+            if vals:
+                parts.append(f"{key}: {', '.join(vals[:10])}")
+        return {"result": f"Extracted {total} entities:\n" + "\n".join(parts) if parts
+                else "No entities found in text."}
+
+    def _handle_voter_search(self, name: str = "", phone: str = "",
+                             city: str = "", national_id: str = "") -> Dict:
+        """Handler for search_voter_database tool. Returns ALL matching rows with full data."""
+        self._tool_log("voter_search", f"Searching voter DB: name='{name}' phone='{phone}' city='{city}'")
+        voter_db = self.global_tools.get("voter_db_search")
+        if not voter_db:
+            return {"error": "Voter database tool not available"}
+        result = voter_db.execute(name=name, phone=phone, city=city, national_id=national_id)
+        if result.success:
+            data = result.data
+            records = data.get("records", [])
+            if not records:
+                return {"result": "No voter registration records found."}
+            lines = [f"Found {len(records)} voter record(s):"]
+            for r in records:
+                lines.append(
+                    f"  Name: {r.get('first_name', '')} {r.get('father_name', '')} "
+                    f"{r.get('grandfather_name', '')} {r.get('family_name', '')}"
+                )
+                lines.append(
+                    f"  Voter ID: {r.get('voter_id', '')} | National ID: {r.get('national_id', '')}"
+                )
+                lines.append(
+                    f"  City: {r.get('city', '')} | Phone: {r.get('phone', '')} "
+                    f"| DOB: {r.get('date_of_birth', '')} | Gender: {r.get('gender', '')}"
+                )
+                lines.append(
+                    f"  Mother: {r.get('mother_name', '')} | Registered: {r.get('registration_date', '')}"
+                )
+                lines.append("  ---")
+            # Cross-reference with intel_reports for additional identification
+            search_term = name or phone
+            if search_term:
+                try:
+                    intel_agent = self.agents.get("intel_reports")
+                    if intel_agent and hasattr(intel_agent, 'tool_calling_engine') and intel_agent.tool_calling_engine:
+                        intel_result = intel_agent.search({"query": search_term, "identifier": search_term})
+                        intel_text = intel_result.get("results", "")
+                        if intel_text and "No data" not in str(intel_text)[:50]:
+                            lines.append(f"\n--- Intel Reports Cross-Reference ---")
+                            lines.append(str(intel_text)[:500])
+                except Exception:
+                    pass
+            return {"result": "\n".join(lines)}
+        return {"error": result.error}
+
+    def _handle_text_db_search(self, db_name: str = "", query: str = "",
+                               search_groups: List[List[str]] = None) -> Dict:
+        """Handler for search_text_database tool.
+
+        Supports two search modes:
+        1. Flat query (backward-compatible): splits by space, OR matches any term
+        2. AND/OR groups: each group is OR'd internally, groups AND'd together
+           A record must match at least one term from EVERY group.
+        """
+        self._tool_log("search_text_db", f"Searching '{db_name}' DB for '{query}'"
+                       + (f" with {len(search_groups)} AND groups" if search_groups else ""))
+        # Map db_name to Config paths
+        db_map = {
+            "travel": Config.TRAVEL_DB, "meta": Config.META_DATA_DB,
+            "osint": Config.OSINT_DB, "intel_reports": Config.INTEL_REPORTS_DB,
+            "sigint": Config.SIGINT_DB, "fisa": Config.FISA_DB,
+            "cne": Config.CNE_DB, "access": Config.ACCESS_DB,
+            "accessibility": Config.ACCESSIBILITY_DB, "motivation": Config.MOTIVATION_DB,
+            "suitability": Config.SUITABILITY_DB, "security": Config.SECURITY_DB,
+            "counter_intel": Config.COUNTER_INTEL_DB,
+            "geoint": Config.GEOINT_DB,
+            "pattern_of_life": Config.PATTERN_OF_LIFE_DB,
+        }
+        db_path = db_map.get(db_name)
+        if not db_path:
+            return {"error": f"Unknown database: {db_name}. Available: {list(db_map.keys())}"}
+        if not os.path.exists(db_path):
+            return {"error": f"Database file not found: {db_path}"}
+
+        with open(db_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        records = [r.strip() for r in content.split("\n\n") if r.strip()]
+        matching = []
+
+        if search_groups:
+            # AND/OR matching: record must match at least one term from EACH group
+            for record in records:
+                record_lower = record.lower()
+                if all(
+                    any(term.lower() in record_lower or term in record
+                        for term in group)
+                    for group in search_groups
+                ):
+                    matching.append(record)
+            self._tool_log("search_text_db",
+                           f"AND/OR search: {' AND '.join('(' + '|'.join(g[:3]) + ('...' if len(g)>3 else '') + ')' for g in search_groups)}")
+        else:
+            # Original flat OR search
+            query_lower = query.lower()
+            terms = [t.strip() for t in query_lower.split() if len(t.strip()) > 2]
+            arabic_terms = [t for t in query.split() if any('\u0600' <= c <= '\u06FF' for c in t)]
+
+            for record in records:
+                record_check = record.lower()
+                if any(t in record_check for t in terms) or any(t in record for t in arabic_terms):
+                    matching.append(record)
+
+        if matching:
+            self._tool_log("search_text_db", f"Found {len(matching)} records in {db_name}")
+            return {"result": f"Found {len(matching)} records in {db_name} database:\n\n" +
+                    "\n\n".join(matching[:20])}  # Cap at 20 records
+        self._tool_log("search_text_db", f"No records found in {db_name}")
+        return {"result": f"No records matching '{query}' found in {db_name} database."}
+
+    def _handle_llm_analysis(self, text: str = "", question: str = "") -> Dict:
+        """Handler for analyze_with_llm tool."""
+        self._tool_log("analyze_llm", f"LLM analysis: '{question[:80]}'")
+        if not self.llm:
+            return {"error": "LLM not configured"}
+        try:
+            result = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": "You are an intelligence analyst. "
+                     "Analyze the provided data and answer the question concisely. "
+                     "Focus on facts, connections, and actionable intelligence."},
+                    {"role": "user", "content": f"DATA:\n{text}\n\nQUESTION:\n{question}"},
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            return {"result": result["content"]}
+        except Exception as e:
+            return {"error": f"LLM analysis failed: {str(e)}"}
+
+    def _load_agent_specific_tools(self, agent_key: str) -> Dict:
+        """Load tools from tools/agent_specific/{agent_key}/ folder."""
+        import importlib
+        import inspect
+        from tools.base_tool import BaseTool
+
+        agent_tools_dir = os.path.join(Config.AGENT_TOOLS_BASE, agent_key)
+        tools = {}
+        if not os.path.isdir(agent_tools_dir):
+            return tools
+        for filename in os.listdir(agent_tools_dir):
+            if filename.endswith(".py") and not filename.startswith("_"):
+                module_name = f"tools.agent_specific.{agent_key}.{filename[:-3]}"
+                try:
+                    module = importlib.import_module(module_name)
+                    for name, obj in inspect.getmembers(module, inspect.isclass):
+                        if issubclass(obj, BaseTool) and obj is not BaseTool:
+                            instance = obj()
+                            tools[instance.name] = instance
+                except Exception as e:
+                    print(f"Failed to load agent tool {filename} for {agent_key}: {e}")
+        return tools
+
+    def _init_agents(self) -> Dict[str, Any]:
+        return {
+            "travel": TravelAgent(Config.TRAVEL_DB, self.llm),
+            "meta": MetaDataAgent(Config.META_DATA_DB, self.llm),
+            "osint": OSINTAgent(Config.OSINT_DB, self.llm),
+            "intel_reports": IntelReportsAgent(Config.INTEL_REPORTS_DB, self.llm),
+            "sigint": SIGINTAgent(Config.SIGINT_DB, self.llm),
+            "fisa": FISAAgent(Config.FISA_DB, self.llm),
+            "cne": CNEAgent(Config.CNE_DB, self.llm),
+            "access": AccessAgent(Config.ACCESS_DB, self.llm),
+            "accessibility": AccessibilityAgent(Config.ACCESSIBILITY_DB, self.llm),
+            "motivation": MotivationAgent(Config.MOTIVATION_DB, self.llm),
+            "suitability": SuitabilityAgent(Config.SUITABILITY_DB, self.llm),
+            "security": SecurityAgent(Config.SECURITY_DB, self.llm),
+            "counter_intel": CounterIntelAgent(Config.COUNTER_INTEL_DB, self.llm),
+            "geoint": GEOINTAgent(Config.GEOINT_DB, self.llm),
+            "pattern_of_life": PatternOfLifeAgent(Config.PATTERN_OF_LIFE_DB, self.llm),
+            "sna": SocialNetworkAgent(llm=self.llm),
+        }
+
+    # --- Structured Search Helpers ---
+
+    def build_search_groups(self, identifiers: Dict) -> List[List[str]]:
+        """Build AND/OR search groups from structured identifiers.
+
+        Each inner list is OR'd (any variation matches).
+        Outer list is AND'd (all groups must match).
+
+        Example:
+            identifiers = {
+                "first_name": "Mohammad",
+                "first_name_variations": "Mohammed, Muhammad",
+                "father_name": "Ali",
+                "native_name": "محمد علي"
+            }
+            Returns: [
+                ["Mohammad", "Mohammed", "Muhammad", "محمد", ...auto-expanded...],
+                ["Ali", "علي", ...auto-expanded...],
+            ]
+        """
+        name_gen = self.global_tools.get("name_variation_generator")
+        groups = []
+        name_fields = [
+            ("first_name", "first_name_variations"),
+            ("father_name", "father_name_variations"),
+            ("third_name", "third_name_variations"),
+            ("fourth_name", "fourth_name_variations"),
+        ]
+
+        # Parse native name into parts for cross-referencing
+        native_name = identifiers.get("native_name", "")
+        native_parts = native_name.split() if native_name else []
+
+        for idx, (base_field, var_field) in enumerate(name_fields):
+            base = identifiers.get(base_field, "").strip()
+            variations_str = identifiers.get(var_field, "")
+            if not base:
+                continue
+
+            group = {base}
+
+            # Add user-provided variations (comma-separated)
+            if variations_str:
+                for v in variations_str.split(","):
+                    v = v.strip()
+                    if v:
+                        group.add(v)
+
+            # Auto-expand each term using name variation generator
+            if name_gen:
+                for term in list(group):
+                    result = name_gen.execute(name=term, use_llm=False)
+                    if result.success:
+                        group.update(result.data.get("search_terms", []))
+
+            # Add corresponding native language part
+            if idx < len(native_parts):
+                group.add(native_parts[idx])
+
+            groups.append(list(group))
+
+        return groups
+
+    def build_phone_variations(self, phone: str) -> Dict[str, List[str]]:
+        """Generate phone number variations for different search contexts."""
+        from tools.shared.name_variation_generator import NameVariationGenerator
+        return NameVariationGenerator.generate_phone_variations(phone)
+
+    def build_search_description(self, identifiers: Dict) -> str:
+        """Build a human-readable search description for prompts.
+
+        Shows the AND/OR structure clearly so LLM knows what to search for.
+        """
+        lines = []
+        name_fields = [
+            ("first_name", "first_name_variations", "First name"),
+            ("father_name", "father_name_variations", "Father name"),
+            ("third_name", "third_name_variations", "Third name"),
+            ("fourth_name", "fourth_name_variations", "Fourth/Tribe name"),
+        ]
+
+        for base_field, var_field, label in name_fields:
+            base = identifiers.get(base_field, "").strip()
+            if not base:
+                continue
+            variations_str = identifiers.get(var_field, "")
+            all_names = [base]
+            if variations_str:
+                all_names.extend([v.strip() for v in variations_str.split(",") if v.strip()])
+            lines.append(f"  {label} (any of): {', '.join(all_names)}")
+
+        native = identifiers.get("native_name", "")
+        if native:
+            lines.append(f"  Native language: {native}")
+
+        kunya = identifiers.get("kunya", "")
+        if kunya:
+            lines.append(f"  Kunya: {kunya}")
+
+        aliases = identifiers.get("aliases", "")
+        if aliases:
+            lines.append(f"  Aliases: {aliases}")
+
+        phone = identifiers.get("phone", "")
+        if phone:
+            phone_vars = self.build_phone_variations(phone)
+            short = [v for v in phone_vars.get("short", []) if v != phone]
+            if short:
+                lines.append(f"  Phone: {phone} (also try: {', '.join(short[:3])})")
+            else:
+                lines.append(f"  Phone: {phone}")
+
+        email = identifiers.get("email", "")
+        if email:
+            lines.append(f"  Email: {email}")
+
+        if lines:
+            return "Search for this target:\n" + "\n".join(lines) + \
+                   "\n\nA record is relevant if it matches ALL name parts (any variation within each)."
+        return ""
+
+    def create_target_card(self, event_bus=None, **kwargs) -> Dict[str, Any]:
+        """Create a target card from structured identifiers.
+
+        5-phase pipeline with per-target persistent storage:
+        Phase 1: Collect raw results from all 14 database agents
+        Phase 2: Preprocess with adapter tools AND store records (0 LLM calls)
+        Phase 3: Secondary search — find contacts in other DBs (0 LLM calls)
+        Phase 4: Social Network Analysis (0 LLM calls for graph)
+        Phase 5: Enrichment synthesis — only new records processed (LLM calls)
+
+        Args:
+            event_bus: Optional EventBus for live SSE streaming to frontend
+            **kwargs: All identifier fields (first_name, phone, etc.)
+        """
+        import hashlib
+        import time as _time
+
+        # Backward compatibility: "name" → "first_name"
+        if "name" in kwargs and "first_name" not in kwargs:
+            kwargs["first_name"] = kwargs.pop("name")
+
+        identifiers = {k: v for k, v in kwargs.items()
+                       if v is not None and k != "timestamp"}
+        identifiers["timestamp"] = datetime.now().isoformat()
+
+        # Build search groups for AND/OR matching
+        search_groups = self.build_search_groups(identifiers)
+        if search_groups:
+            identifiers["_search_groups"] = search_groups
+
+        # Build a combined name for backward-compatible agent methods
+        name_parts = []
+        for f in ["first_name", "father_name", "third_name", "fourth_name"]:
+            if identifiers.get(f):
+                name_parts.append(identifiers[f])
+        combined_name = " ".join(name_parts) if name_parts else ""
+
+        phone = identifiers.get("phone")
+        email = identifiers.get("email")
+        passport = identifiers.get("passport")
+        ip_address = identifiers.get("ip_address")
+
+        # --- Target Store: get or create target, start run ---
+        target_store = self.target_store
+        target_id, is_new_target = target_store.get_or_create_target(identifiers)
+        agent_keys_to_run = []  # populated during Phase 1
+        run_id = target_store.start_run(target_id, [])  # agents updated later
+
+        def emit(event_type, **ev_kwargs):
+            if event_bus:
+                from tools.shared.event_bus import PipelineEvent
+                event_bus.emit(PipelineEvent(
+                    event_type=event_type, run_id=run_id, **ev_kwargs))
+
+        emit("pipeline_started",
+             message=f"Pipeline started for {combined_name or phone or 'target'}",
+             data={"target_id": target_id, "is_new": is_new_target})
+
+        # =====================================================================
+        # Phase 1: Collect raw results from all 14 database agents
+        # All agents use tool-calling engine — zero direct DB access
+        # =====================================================================
+        print("\n[PIPELINE] Phase 1: Collecting raw results from all agents")
+        raw_results = {}
+
+        all_agent_keys = [
+            "travel", "meta", "osint", "intel_reports",
+            "sigint", "fisa", "cne",
+            "access", "accessibility", "motivation", "suitability",
+            "security", "counter_intel", "geoint", "pattern_of_life",
+        ]
+
+        if combined_name or phone or email or passport:
+            for agent_key in all_agent_keys:
+                emit("agent_started", agent_key=agent_key,
+                     message=f"{agent_key.upper()} agent searching...")
+                agent = self.agents[agent_key]
+                r = agent.search(identifiers)
+                raw_results[agent_key] = r.get("results", "No data")
+                emit("agent_complete", agent_key=agent_key,
+                     message=f"{agent_key.upper()}: {len(raw_results.get(agent_key, ''))} chars")
+
+        agent_keys_to_run = list(raw_results.keys())
+        print(f"[PIPELINE] Phase 1 complete: {len(raw_results)} agents queried")
+
+        # Update run with actual agents used
+        conn = __import__("sqlite3").connect(target_store.db_path)
+        conn.execute("UPDATE runs SET agents_used = ? WHERE run_id = ?",
+                     (json.dumps(agent_keys_to_run), run_id))
+        conn.commit()
+        conn.close()
+
+        # =====================================================================
+        # Phase 2: Preprocess with adapter tools AND store records (0 LLM calls)
+        # =====================================================================
+        print("[PIPELINE] Phase 2: Preprocessing with adapter tools + storing records")
+        preprocessed, store_stats, new_record_ids = self._preprocess_and_store(
+            raw_results, target_id, run_id, target_store, event_bus)
+        print(f"[PIPELINE] Phase 2 complete: {len(preprocessed)} agents preprocessed, "
+              f"{store_stats['new']} new, {store_stats['duplicate']} dupes, "
+              f"{store_stats['tombstoned']} tombstoned")
+
+        # =====================================================================
+        # Phase 3: Secondary search — find contacts in other DBs (0 LLM calls)
+        # =====================================================================
+        print("[PIPELINE] Phase 3: Secondary search for contacts")
+        emit("contact_search_started", message="Secondary contact search...",
+             data={"phase": 3})
+        contact_intel = self._run_secondary_search(preprocessed, phone)
+        contact_stats = {}
+        if hasattr(contact_intel, "data"):
+            contact_stats = contact_intel.data.get("search_stats", {})
+        elif isinstance(contact_intel, dict):
+            contact_stats = contact_intel.get("search_stats", {})
+
+        # Store contact intel records
+        if isinstance(contact_intel, dict):
+            ci_data = contact_intel.get("contact_intel", {})
+            for phone_key, ci in ci_data.items():
+                target_store.store_record(
+                    target_id=target_id, run_id=run_id,
+                    source_agent="contact_search", source_tool="contact_search",
+                    source_record_id=phone_key, record_type="contact_intel",
+                    structured_data=ci,
+                )
+
+        emit("contact_search_complete",
+             message=f"Contact search: {contact_stats.get('contacts_found', 0)} found",
+             data=contact_stats)
+        print(f"[PIPELINE] Phase 3 complete: "
+              f"{contact_stats.get('contacts_searched', 0)} contacts searched, "
+              f"{contact_stats.get('contacts_found', 0)} found in DBs")
+
+        # =====================================================================
+        # Phase 4: Social Network Analysis (0 LLM calls for graph)
+        # =====================================================================
+        print("[PIPELINE] Phase 4: Social Network Analysis")
+        emit("sna_started", message="Building social network...")
+        network_analysis = {}
+        sna_agent = self.agents.get("sna")
+        if sna_agent:
+            network_analysis = sna_agent.analyze_full_network(
+                target_phone=phone or "",
+                target_name=combined_name,
+                preprocessed=preprocessed,
+                contact_intel=contact_intel,
+            )
+            net = network_analysis.get("network", {})
+            analysis = network_analysis.get("analysis", {})
+            emit("sna_complete",
+                 message=f"SNA: {net.get('total_nodes', 0)} nodes, "
+                         f"{net.get('total_edges', 0)} edges",
+                 data={"nodes": net.get("total_nodes", 0),
+                       "edges": net.get("total_edges", 0),
+                       "clusters": len(analysis.get("clusters", []))})
+            print(f"[PIPELINE] Phase 4 complete: "
+                  f"{net.get('total_nodes', 0)} nodes, "
+                  f"{net.get('total_edges', 0)} edges")
+        else:
+            emit("sna_complete", message="SNA skipped: agent not available")
+            print("[PIPELINE] Phase 4 skipped: SNA agent not available")
+
+        # =====================================================================
+        # Phase 5: Enrichment synthesis (LLM calls — only for new records)
+        # =====================================================================
+        print("[PIPELINE] Phase 5: Report synthesis")
+
+        # Check if there are new records to process
+        if store_stats["new"] == 0 and not is_new_target:
+            # No new data — try to return existing report
+            existing_report = target_store.get_latest_report(target_id)
+            if existing_report:
+                emit("synthesis_started",
+                     message="No new records — returning existing report",
+                     data={"mode": "cached", "version": existing_report["version"]})
+                emit("pipeline_complete",
+                     message=f"Pipeline complete (cached). Report v{existing_report['version']}",
+                     data={"target_id": target_id, "total_new": 0,
+                           "report_version": existing_report["version"]})
+
+                target_store.complete_run(run_id, {
+                    "new": 0, "duplicate": store_stats["duplicate"],
+                    "tombstoned": store_stats["tombstoned"],
+                    "report_version": existing_report["version"],
+                })
+
+                print("[PIPELINE] Phase 5: No new records, returning cached report")
+                return {
+                    "target": identifiers,
+                    "target_id": target_id,
+                    "run_id": run_id,
+                    "report_id": f"cached_v{existing_report['version']}",
+                    "final_report": existing_report["report_text"],
+                    "sections": existing_report["sections_json"],
+                    "summary": existing_report["report_text"][:500],
+                    "connections": existing_report["sections_json"].get("cross_references", []),
+                    "risk_assessment": existing_report["sections_json"].get("risk_assessment", ""),
+                    "network_analysis": network_analysis,
+                    "agent_results": raw_results,
+                    "store_stats": store_stats,
+                    "enrichment_mode": "cached",
+                }
+
+        # Determine enrichment vs fresh synthesis
+        previous_report = target_store.get_latest_report(target_id)
+        synthesis_mode = "enrichment" if previous_report else "fresh"
+
+        emit("synthesis_started",
+             message=f"Synthesizing report ({synthesis_mode} mode, "
+                     f"{store_stats['new']} new records)...",
+             data={"mode": synthesis_mode, "new_records": store_stats["new"]})
+
+        from tools.shared.report_synthesizer import ReportSynthesizer
+        synthesizer = ReportSynthesizer(self.llm, self.results_store)
+
+        if synthesis_mode == "enrichment" and new_record_ids:
+            report = synthesizer.synthesize_enriched(
+                target_id=target_id,
+                target_store=target_store,
+                run_id=run_id,
+                new_record_ids=new_record_ids,
+                target_identifiers=identifiers,
+                agent_results_map=raw_results,
+                preprocessed_data=preprocessed,
+                contact_intel=contact_intel,
+                network_analysis=network_analysis,
+            )
+        else:
+            report = synthesizer.synthesize(
+                target_identifiers=identifiers,
+                agent_results_map=raw_results,
+                preprocessed_data=preprocessed,
+                contact_intel=contact_intel,
+                network_analysis=network_analysis,
+            )
+
+        # Save versioned report in TargetStore
+        report_version = target_store.save_report(
+            target_id=target_id, run_id=run_id,
+            report_text=report["final_report"],
+            sections=report["sections"],
+            memory=report.get("memory", {}),
+            records_referenced=new_record_ids,
+            records_excluded=[],
+            enrichment_delta=f"{store_stats['new']} new records" if synthesis_mode == "enrichment" else None,
+        )
+
+        # Mark which records made it to the report
+        if new_record_ids:
+            target_store.mark_records_in_report(
+                target_id, new_record_ids, "confirmed_findings")
+
+        emit("synthesis_complete",
+             message=f"Report v{report_version} generated",
+             data={"report_version": report_version})
+
+        # Complete the run
+        target_store.complete_run(run_id, {
+            "new": store_stats["new"],
+            "duplicate": store_stats["duplicate"],
+            "tombstoned": store_stats["tombstoned"],
+            "report_version": report_version,
+        })
+
+        emit("pipeline_complete",
+             message=f"Pipeline complete. Report v{report_version}. "
+                     f"{store_stats['new']} new records.",
+             data={"target_id": target_id, "total_new": store_stats["new"],
+                   "report_version": report_version})
+
+        print("[PIPELINE] Phase 5 complete: Report generated")
+
+        return {
+            "target": identifiers,
+            "target_id": target_id,
+            "run_id": run_id,
+            "report_id": report["report_id"],
+            "final_report": report["final_report"],
+            "sections": report["sections"],
+            "summary": report["final_report"][:500] if report["final_report"] else "",
+            "connections": report["sections"].get("cross_references", []),
+            "risk_assessment": report["sections"].get("risk_assessment", ""),
+            "network_analysis": network_analysis,
+            "agent_results": raw_results,
+            "store_stats": store_stats,
+            "report_version": report_version,
+        }
+
+    # --- Preprocessing, Storage & Secondary Search Helpers ---
+
+    def _preprocess_and_store(self, raw_results: Dict, target_id: str,
+                              run_id: str, target_store, event_bus=None) -> tuple:
+        """Phase 2: Run adapter tools AND store records. Zero LLM calls.
+
+        Returns (preprocessed_dict, store_stats, new_record_ids).
+        """
+        import hashlib
+        import time as _time
+        from tools.agent_specific.sigint.cdr_query import CDRQueryTool
+        from tools.agent_specific.fisa.fisa_query import FISAQueryTool
+        from tools.agent_specific.travel.travel_query import TravelQueryTool
+        from tools.shared.generic_entity_extractor import GenericEntityExtractor
+
+        def emit(event_type, **ev_kwargs):
+            if event_bus:
+                from tools.shared.event_bus import PipelineEvent
+                event_bus.emit(PipelineEvent(
+                    event_type=event_type, run_id=run_id, **ev_kwargs))
+
+        cdr_tool = CDRQueryTool()
+        fisa_tool = FISAQueryTool()
+        travel_tool = TravelQueryTool()
+        entity_tool = GenericEntityExtractor()
+
+        preprocessed = {}
+        total_stats = {"new": 0, "duplicate": 0, "tombstoned": 0}
+        all_new_ids = []
+
+        # Map agent_key → (tool_instance, tool_name, record_type)
+        tool_map = {
+            "sigint": (cdr_tool, "cdr_query", "cdr_record"),
+            "fisa": (fisa_tool, "fisa_query", "fisa_order"),
+            "travel": (travel_tool, "travel_query", "travel_trip"),
+        }
+
+        for agent_key, result in raw_results.items():
+            result_text = result if isinstance(result, str) else str(result)
+            if not result_text or result_text == "No data":
+                continue
+
+            t0 = _time.time()
+
+            if agent_key in tool_map:
+                tool, tool_name, record_type = tool_map[agent_key]
+                emit("tool_called", agent_key=agent_key, tool_name=tool_name,
+                     message=f"{tool_name} processing {agent_key.upper()} data...")
+
+                if agent_key == "sigint":
+                    tool_result = tool.execute(data=result_text)
+                elif agent_key == "fisa":
+                    tool_result = tool.execute(data=result_text)
+                elif agent_key == "travel":
+                    tool_result = tool.execute(data=result_text)
+            else:
+                tool_name = "generic_entity_extractor"
+                record_type = "entity"
+                emit("tool_called", agent_key=agent_key, tool_name=tool_name,
+                     message=f"Entity extraction for {agent_key.upper()}...")
+                tool_result = entity_tool.execute(text=result_text)
+
+            preprocessed[agent_key] = tool_result
+
+            elapsed_ms = (_time.time() - t0) * 1000
+
+            # Extract records to store
+            data = tool_result.data if hasattr(tool_result, "data") else tool_result
+            if not isinstance(data, dict):
+                continue
+
+            # Get the appropriate record list from tool output
+            records_to_store = []
+            if record_type == "cdr_record":
+                records_to_store = data.get("records", [])
+            elif record_type == "fisa_order":
+                records_to_store = data.get("orders", [])
+            elif record_type == "travel_trip":
+                records_to_store = data.get("trips", [])
+            elif record_type == "entity":
+                # For generic entities, store as a single record
+                if any(data.get(k) for k in ["phones", "emails", "names"]):
+                    records_to_store = [data]
+
+            # Store records in TargetStore
+            if records_to_store:
+                batch_stats = target_store.store_records_batch(
+                    target_id=target_id, run_id=run_id,
+                    source_agent=agent_key, source_tool=tool_name,
+                    records=records_to_store, record_type=record_type,
+                )
+                total_stats["new"] += batch_stats["new"]
+                total_stats["duplicate"] += batch_stats["duplicate"]
+                total_stats["tombstoned"] += batch_stats["tombstoned"]
+                all_new_ids.extend(batch_stats["new_ids"])
+            else:
+                batch_stats = {"new": 0, "duplicate": 0, "tombstoned": 0}
+
+            # Log tool execution for audit trail
+            input_hash = hashlib.sha256(result_text[:10000].encode()).hexdigest()[:16]
+            target_store.log_tool_execution(
+                run_id=run_id, target_id=target_id,
+                agent_key=agent_key, tool_name=tool_name,
+                raw_input_hash=input_hash,
+                raw_output_json=json.dumps(data, default=str, ensure_ascii=False)[:50000],
+                record_count=len(records_to_store),
+                execution_time_ms=elapsed_ms,
+            )
+
+            emit("tool_result", agent_key=agent_key, tool_name=tool_name,
+                 message=f"{tool_name}: {len(records_to_store)} records "
+                         f"({batch_stats['new']} new, {batch_stats['duplicate']} dupe, "
+                         f"{batch_stats['tombstoned']} blocked)",
+                 data={"records": len(records_to_store),
+                       "new": batch_stats["new"],
+                       "duplicate": batch_stats["duplicate"],
+                       "tombstoned": batch_stats["tombstoned"]})
+
+        return preprocessed, total_stats, all_new_ids
+
+    def _preprocess_raw_results(self, raw_results: Dict) -> Dict:
+        """Phase 2 (legacy): Run adapter tools on raw results. Zero LLM calls.
+        Kept for backward compatibility with tests."""
+        preprocessed, _, _ = self._preprocess_and_store(
+            raw_results,
+            target_id="legacy",
+            run_id="legacy",
+            target_store=self.target_store,
+        )
+        return preprocessed
+
+    def _run_secondary_search(self, preprocessed: Dict,
+                              target_phone: str = "") -> Dict:
+        """Phase 3: Search all DBs for extracted contacts. Zero LLM calls."""
+        from tools.shared.contact_search import ContactSearchTool
+
+        # Merge and deduplicate contacts from all preprocessed data
+        all_contacts = self._merge_contacts(preprocessed)
+
+        if not all_contacts:
+            return {"contact_intel": {}, "search_stats": {
+                "contacts_searched": 0, "contacts_found": 0,
+                "databases_searched": 0, "total_matches": 0}}
+
+        contact_tool = ContactSearchTool()
+        contact_tool.set_agents(self.agents)
+        result = contact_tool.execute(
+            contacts=all_contacts,
+            target_phone=target_phone or "",
+        )
+        if result.success:
+            return result.data
+        return {"contact_intel": {}, "search_stats": {
+            "contacts_searched": 0, "contacts_found": 0,
+            "databases_searched": 0, "total_matches": 0}}
+
+    def _merge_contacts(self, preprocessed: Dict) -> list:
+        """Merge and deduplicate contacts from all preprocessed results."""
+        seen_phones = set()
+        contacts = []
+
+        for agent_key, result in preprocessed.items():
+            data = result.data if hasattr(result, "data") else result
+            if not isinstance(data, dict):
+                continue
+
+            # CDR contact_list
+            for c in data.get("contact_list", []):
+                phone = c.get("phone", "").strip()
+                name = c.get("name", "").strip()
+                if phone and phone not in seen_phones:
+                    seen_phones.add(phone)
+                    contacts.append({"phone": phone, "name": name})
+
+            # Travel co_traveler_list
+            for c in data.get("co_traveler_list", []):
+                phone = c.get("phone", "").strip()
+                name = c.get("name", "").strip()
+                if phone and phone not in seen_phones:
+                    seen_phones.add(phone)
+                    contacts.append({"phone": phone, "name": name})
+                elif name and not phone:
+                    contacts.append({"phone": "", "name": name})
+
+            # FISA all_contacts
+            for c in data.get("all_contacts", []):
+                phone = c.get("phone", "").strip()
+                name = c.get("name", "").strip()
+                if phone and phone not in seen_phones:
+                    seen_phones.add(phone)
+                    contacts.append({"phone": phone, "name": name})
+
+            # Generic entity extractor phones
+            for phone in data.get("phones", []):
+                phone = phone.strip()
+                if phone and phone not in seen_phones:
+                    seen_phones.add(phone)
+                    contacts.append({"phone": phone, "name": "UNKNOWN"})
+
+        return contacts
+
+    def get_llm_metrics(self) -> Dict:
+        return self.llm.get_metrics_summary()
+
+
+========================================
+FILE: agents/leo_manager.py
+========================================
+"""V2 LEO Manager - Create, schedule, execute, and persist LEOs."""
+
+import json
+import os
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from uuid import uuid4
+
+
+class LEOManager:
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+        self.leos_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "leos.json"
+        )
+        self.leos = self.load_leos()
+
+    def load_leos(self) -> Dict:
+        if os.path.exists(self.leos_file):
+            try:
+                with open(self.leos_file, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save_leos(self):
+        os.makedirs(os.path.dirname(self.leos_file), exist_ok=True)
+        with open(self.leos_file, "w") as f:
+            json.dump(self.leos, f, indent=2, default=str)
+
+    def create_leo(self, name: str, description: str, target_identifiers: Dict,
+                   selected_agents: List[str], schedule: Optional[str] = None) -> str:
+        leo_id = f"leo_{uuid4().hex[:8]}"
+        self.leos[leo_id] = {
+            "id": leo_id, "name": name, "description": description,
+            "target_identifiers": target_identifiers,
+            "selected_agents": selected_agents,
+            "schedule": schedule or "manual",
+            "created_at": datetime.now().isoformat(),
+            "last_run": None, "status": "active", "results": [],
+        }
+        self.save_leos()
+        return leo_id
+
+    def update_leo(self, leo_id: str, updates: Dict) -> bool:
+        """Update an existing LEO's configuration."""
+        if leo_id not in self.leos:
+            return False
+        leo = self.leos[leo_id]
+        for key in ["name", "description", "target_identifiers", "selected_agents", "schedule"]:
+            if key in updates and updates[key] is not None:
+                leo[key] = updates[key]
+        leo["updated_at"] = datetime.now().isoformat()
+        self.save_leos()
+        return True
+
+    def get_leo(self, leo_id: str) -> Optional[Dict]:
+        """Get a single LEO by ID."""
+        return self.leos.get(leo_id)
+
+    def run_leo(self, leo_id: str, event_bus=None,
+                run_id: Optional[str] = None, target_id: Optional[str] = None) -> Dict:
+        if leo_id not in self.leos:
+            return {"error": "LEO not found"}
+        leo = self.leos[leo_id]
+        identifiers = leo["target_identifiers"]
+
+        target_store = self.orchestrator.target_store
+        if not target_id:
+            target_id, _ = target_store.get_or_create_target(identifiers)
+        if not run_id:
+            run_id = target_store.start_run(
+                target_id, leo["selected_agents"], leo_id=leo_id)
+
+        def emit(event_type, **ev_kwargs):
+            if event_bus:
+                from tools.shared.event_bus import PipelineEvent
+                event_bus.emit(PipelineEvent(
+                    event_type=event_type, run_id=run_id, **ev_kwargs))
+
+        emit("pipeline_started",
+             message=f"LEO '{leo['name']}' started",
+             data={"target_id": target_id, "leo_id": leo_id})
+
+        # Phase 1: Collect raw results from selected agents
+        raw_results = {}
+        for agent_type in leo["selected_agents"]:
+            if agent_type in self.orchestrator.agents and agent_type != "sna":
+                emit("agent_started", agent_key=agent_type,
+                     message=f"{agent_type.upper()} agent searching...")
+                agent = self.orchestrator.agents[agent_type]
+                agent_result = agent.search(identifiers)
+                raw_results[agent_type] = agent_result.get("results", "No data")
+                emit("agent_complete", agent_key=agent_type,
+                     message=f"{agent_type.upper()}: {len(raw_results.get(agent_type, ''))} chars")
+
+        # Phase 2: Preprocess with adapter tools AND store (0 LLM calls)
+        preprocessed, store_stats, new_record_ids = \
+            self.orchestrator._preprocess_and_store(
+                raw_results, target_id, run_id, target_store, event_bus)
+
+        # Phase 3: Secondary search (0 LLM calls)
+        target_phone = identifiers.get("phone", "")
+        emit("contact_search_started", message="Secondary contact search...")
+        contact_intel = self.orchestrator._run_secondary_search(
+            preprocessed, target_phone)
+        contact_stats = {}
+        if isinstance(contact_intel, dict):
+            contact_stats = contact_intel.get("search_stats", {})
+            # Store contact intel records
+            for phone_key, ci in contact_intel.get("contact_intel", {}).items():
+                target_store.store_record(
+                    target_id=target_id, run_id=run_id,
+                    source_agent="contact_search", source_tool="contact_search",
+                    source_record_id=phone_key, record_type="contact_intel",
+                    structured_data=ci,
+                )
+        emit("contact_search_complete",
+             message=f"Contact search: {contact_stats.get('contacts_found', 0)} found",
+             data=contact_stats)
+
+        # Phase 4: Social Network Analysis (0 LLM calls for graph)
+        emit("sna_started", message="Building social network...")
+        network_analysis = {}
+        sna_agent = self.orchestrator.agents.get("sna")
+        if sna_agent:
+            name_parts = []
+            for f in ["first_name", "father_name", "third_name", "fourth_name"]:
+                if identifiers.get(f):
+                    name_parts.append(identifiers[f])
+            combined_name = " ".join(name_parts) if name_parts else ""
+            network_analysis = sna_agent.analyze_full_network(
+                target_phone=target_phone,
+                target_name=combined_name,
+                preprocessed=preprocessed,
+                contact_intel=contact_intel,
+            )
+            net = network_analysis.get("network", {})
+            emit("sna_complete",
+                 message=f"SNA: {net.get('total_nodes', 0)} nodes",
+                 data={"nodes": net.get("total_nodes", 0),
+                       "edges": net.get("total_edges", 0)})
+
+        # Phase 5: Enrichment synthesis
+        if store_stats["new"] == 0:
+            existing = target_store.get_latest_report(target_id)
+            if existing:
+                emit("pipeline_complete",
+                     message=f"No new records. Cached report v{existing['version']}",
+                     data={"target_id": target_id, "total_new": 0,
+                           "report_version": existing["version"]})
+                target_store.complete_run(run_id, {
+                    "new": 0, "duplicate": store_stats["duplicate"],
+                    "tombstoned": store_stats["tombstoned"],
+                    "report_version": existing["version"],
+                })
+                results = {
+                    "leo_id": leo_id, "leo_name": leo["name"],
+                    "timestamp": datetime.now().isoformat(),
+                    "target": identifiers, "target_id": target_id,
+                    "run_id": run_id,
+                    "report_id": f"cached_v{existing['version']}",
+                    "final_report": existing["report_text"],
+                    "sections": existing["sections_json"],
+                    "network_analysis": network_analysis,
+                    "agent_results": raw_results,
+                    "store_stats": store_stats,
+                    "summary": f"LEO '{leo['name']}': No new data. Cached report.",
+                }
+                self.leos[leo_id]["last_run"] = datetime.now().isoformat()
+                self.leos[leo_id]["last_results"] = results
+                if "run_history" not in self.leos[leo_id]:
+                    self.leos[leo_id]["run_history"] = []
+                self.leos[leo_id]["run_history"].append({
+                    "run_id": results.get("run_id"),
+                    "timestamp": results.get("timestamp"),
+                    "store_stats": results.get("store_stats"),
+                    "report_version": results.get("report_version"),
+                    "summary": results.get("summary"),
+                })
+                self.save_leos()
+                return results
+
+        # Determine enrichment vs fresh synthesis
+        previous_report = target_store.get_latest_report(target_id)
+        synthesis_mode = "enrichment" if previous_report and new_record_ids else "fresh"
+
+        emit("synthesis_started",
+             message=f"Synthesizing ({synthesis_mode} mode, "
+                     f"{store_stats['new']} new records)...",
+             data={"mode": synthesis_mode,
+                   "new_records": store_stats["new"]})
+
+        from tools.shared.report_synthesizer import ReportSynthesizer
+        synthesizer = ReportSynthesizer(
+            self.orchestrator.llm, self.orchestrator.results_store,
+        )
+
+        if synthesis_mode == "enrichment":
+            report = synthesizer.synthesize_enriched(
+                target_id=target_id,
+                target_store=target_store,
+                run_id=run_id,
+                new_record_ids=new_record_ids,
+                target_identifiers=identifiers,
+                agent_results_map=raw_results,
+                preprocessed_data=preprocessed,
+                contact_intel=contact_intel,
+                network_analysis=network_analysis,
+            )
+        else:
+            report = synthesizer.synthesize(
+                target_identifiers=identifiers,
+                agent_results_map=raw_results,
+                preprocessed_data=preprocessed,
+                contact_intel=contact_intel,
+                network_analysis=network_analysis,
+            )
+
+        # Save versioned report
+        report_version = target_store.save_report(
+            target_id=target_id, run_id=run_id,
+            report_text=report["final_report"],
+            sections=report["sections"],
+            memory=report.get("memory", {}),
+            records_referenced=new_record_ids,
+            records_excluded=[],
+        )
+
+        if new_record_ids:
+            target_store.mark_records_in_report(
+                target_id, new_record_ids, "confirmed_findings")
+
+        target_store.complete_run(run_id, {
+            "new": store_stats["new"],
+            "duplicate": store_stats["duplicate"],
+            "tombstoned": store_stats["tombstoned"],
+            "report_version": report_version,
+        })
+
+        emit("pipeline_complete",
+             message=f"Pipeline complete. Report v{report_version}.",
+             data={"target_id": target_id, "total_new": store_stats["new"],
+                   "report_version": report_version})
+
+        results = {
+            "leo_id": leo_id, "leo_name": leo["name"],
+            "timestamp": datetime.now().isoformat(),
+            "target": identifiers, "target_id": target_id,
+            "run_id": run_id,
+            "report_id": report["report_id"],
+            "final_report": report["final_report"],
+            "sections": report["sections"],
+            "network_analysis": network_analysis,
+            "agent_results": raw_results,
+            "store_stats": store_stats,
+            "report_version": report_version,
+            "summary": f"LEO '{leo['name']}' executed. Queried {len(leo['selected_agents'])} agents. "
+                       f"New: {store_stats['new']}, Dupes: {store_stats['duplicate']}, "
+                       f"Findings: {len(report['sections'].get('confirmed_findings', []))}, "
+                       f"Excluded: {len(report['sections'].get('excluded_records', []))}, "
+                       f"Cross-refs: {len(report['sections'].get('cross_references', []))}.",
+        }
+        self.leos[leo_id]["last_run"] = datetime.now().isoformat()
+        self.leos[leo_id]["last_results"] = results
+        # Append to run history (lightweight summary, not full results)
+        if "run_history" not in self.leos[leo_id]:
+            self.leos[leo_id]["run_history"] = []
+        self.leos[leo_id]["run_history"].append({
+            "run_id": results.get("run_id"),
+            "timestamp": results.get("timestamp"),
+            "store_stats": results.get("store_stats"),
+            "report_version": results.get("report_version"),
+            "summary": results.get("summary"),
+        })
+        self.save_leos()
+        return results
+
+    def get_all_leos(self) -> List[Dict]:
+        return list(self.leos.values())
+
+    def delete_leo(self, leo_id: str) -> bool:
+        if leo_id in self.leos:
+            del self.leos[leo_id]
+            self.save_leos()
+            return True
+        return False
+
+
+========================================
+FILE: agents/targeting_manager.py
+========================================
+"""V2 Targeting Manager - Create, execute, and persist Targeting Workflows.
+
+Unlike LEO (which lets you pick agents), a Targeting Workflow always runs ALL
+agents and produces a structured targeting report with sections:
+1. Summary
+2. Target Background (Access, Accessibility, Motivations, Suitability)
+3. Pattern of Life
+4. Security & CI
+5. Raw Data (per-agent, collapsible)
+"""
+
+import json
+import os
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from uuid import uuid4
+
+
+class TargetingManager:
+    ALL_AGENTS = [
+        "travel", "meta", "osint", "intel_reports",
+        "sigint", "fisa", "cne",
+        "access", "accessibility", "motivation", "suitability",
+        "security", "counter_intel", "geoint", "pattern_of_life",
+    ]
+
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+        self.workflows_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "targeting_workflows.json",
+        )
+        self.workflows = self.load_workflows()
+
+    def load_workflows(self) -> Dict:
+        if os.path.exists(self.workflows_file):
+            try:
+                with open(self.workflows_file, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save_workflows(self):
+        os.makedirs(os.path.dirname(self.workflows_file), exist_ok=True)
+        with open(self.workflows_file, "w") as f:
+            json.dump(self.workflows, f, indent=2, default=str)
+
+    def create_workflow(self, name: str, description: str,
+                        target_identifiers: Dict) -> str:
+        wf_id = f"tw_{uuid4().hex[:8]}"
+        self.workflows[wf_id] = {
+            "id": wf_id, "name": name, "description": description,
+            "target_identifiers": target_identifiers,
+            "agents": self.ALL_AGENTS,
+            "created_at": datetime.now().isoformat(),
+            "last_run": None, "status": "active", "results": [],
+        }
+        self.save_workflows()
+        return wf_id
+
+    def get_workflow(self, wf_id: str) -> Optional[Dict]:
+        return self.workflows.get(wf_id)
+
+    def get_all_workflows(self) -> List[Dict]:
+        return list(self.workflows.values())
+
+    def update_workflow(self, wf_id: str, updates: Dict) -> bool:
+        if wf_id not in self.workflows:
+            return False
+        wf = self.workflows[wf_id]
+        for key in ["name", "description", "target_identifiers"]:
+            if key in updates and updates[key] is not None:
+                wf[key] = updates[key]
+        wf["updated_at"] = datetime.now().isoformat()
+        self.save_workflows()
+        return True
+
+    def delete_workflow(self, wf_id: str) -> bool:
+        if wf_id in self.workflows:
+            del self.workflows[wf_id]
+            self.save_workflows()
+            return True
+        return False
+
+    def run_workflow(self, wf_id: str, event_bus=None,
+                     run_id: Optional[str] = None,
+                     target_id: Optional[str] = None) -> Dict:
+        if wf_id not in self.workflows:
+            return {"error": "Workflow not found"}
+
+        wf = self.workflows[wf_id]
+        identifiers = wf["target_identifiers"]
+        target_store = self.orchestrator.target_store
+
+        if not target_id:
+            target_id, _ = target_store.get_or_create_target(identifiers)
+        if not run_id:
+            run_id = target_store.start_run(
+                target_id, self.ALL_AGENTS, leo_id=wf_id)
+
+        def emit(event_type, **ev_kwargs):
+            if event_bus:
+                from tools.shared.event_bus import PipelineEvent
+                event_bus.emit(PipelineEvent(
+                    event_type=event_type, run_id=run_id, **ev_kwargs))
+
+        emit("pipeline_started",
+             message=f"Targeting Workflow '{wf['name']}' started (all agents)",
+             data={"target_id": target_id, "workflow_id": wf_id,
+                   "workflow_type": "targeting"})
+
+        # Phase 1: Collect from ALL agents (except SNA, which runs in Phase 4)
+        raw_results = {}
+        for agent_key in self.ALL_AGENTS:
+            if agent_key in self.orchestrator.agents and agent_key != "sna":
+                emit("agent_started", agent_key=agent_key,
+                     message=f"{agent_key.upper()} agent searching...")
+                agent = self.orchestrator.agents[agent_key]
+                agent_result = agent.search(identifiers)
+                raw_results[agent_key] = agent_result.get("results", "No data")
+                emit("agent_complete", agent_key=agent_key,
+                     message=f"{agent_key.upper()}: done")
+
+        # Phase 2: Preprocess & Store (0 LLM calls)
+        preprocessed, store_stats, new_record_ids = \
+            self.orchestrator._preprocess_and_store(
+                raw_results, target_id, run_id, target_store, event_bus)
+
+        # Phase 3: Secondary contact search (0 LLM calls)
+        target_phone = identifiers.get("phone", "")
+        emit("contact_search_started", message="Secondary contact search...")
+        contact_intel = self.orchestrator._run_secondary_search(
+            preprocessed, target_phone)
+        contact_stats = {}
+        if isinstance(contact_intel, dict):
+            contact_stats = contact_intel.get("search_stats", {})
+            for phone_key, ci in contact_intel.get("contact_intel", {}).items():
+                target_store.store_record(
+                    target_id=target_id, run_id=run_id,
+                    source_agent="contact_search", source_tool="contact_search",
+                    source_record_id=phone_key, record_type="contact_intel",
+                    structured_data=ci,
+                )
+        emit("contact_search_complete",
+             message=f"Contact search: {contact_stats.get('contacts_found', 0)} found",
+             data=contact_stats)
+
+        # Phase 4: Social Network Analysis (0 LLM calls for graph)
+        emit("sna_started", message="Building social network...")
+        network_analysis = {}
+        sna_agent = self.orchestrator.agents.get("sna")
+        if sna_agent:
+            name_parts = []
+            for f in ["first_name", "father_name", "third_name", "fourth_name"]:
+                if identifiers.get(f):
+                    name_parts.append(identifiers[f])
+            combined_name = " ".join(name_parts) if name_parts else ""
+            network_analysis = sna_agent.analyze_full_network(
+                target_phone=target_phone,
+                target_name=combined_name,
+                preprocessed=preprocessed,
+                contact_intel=contact_intel,
+            )
+            net = network_analysis.get("network", {})
+            emit("sna_complete",
+                 message=f"SNA: {net.get('total_nodes', 0)} nodes",
+                 data={"nodes": net.get("total_nodes", 0),
+                       "edges": net.get("total_edges", 0)})
+
+        # Phase 5: Targeting-specific report synthesis
+        emit("synthesis_started",
+             message=f"Generating targeting report ({store_stats['new']} new records)...",
+             data={"mode": "targeting", "new_records": store_stats["new"]})
+
+        from tools.shared.targeting_report_synthesizer import TargetingReportSynthesizer
+        synthesizer = TargetingReportSynthesizer(
+            self.orchestrator.llm, self.orchestrator.results_store)
+
+        report = synthesizer.synthesize_targeting_report(
+            target_identifiers=identifiers,
+            agent_results_map=raw_results,
+            preprocessed_data=preprocessed,
+            contact_intel=contact_intel,
+            network_analysis=network_analysis,
+        )
+
+        # Save versioned report
+        report_version = target_store.save_report(
+            target_id=target_id, run_id=run_id,
+            report_text=report["final_report"],
+            sections=report["sections"],
+            memory=report.get("memory", {}),
+            records_referenced=new_record_ids,
+            records_excluded=[],
+        )
+
+        if new_record_ids:
+            target_store.mark_records_in_report(
+                target_id, new_record_ids, "confirmed_findings")
+
+        target_store.complete_run(run_id, {
+            "new": store_stats["new"],
+            "duplicate": store_stats["duplicate"],
+            "tombstoned": store_stats["tombstoned"],
+            "report_version": report_version,
+        })
+
+        emit("pipeline_complete",
+             message=f"Targeting complete. Report v{report_version}.",
+             data={"target_id": target_id, "report_version": report_version})
+
+        results = {
+            "workflow_id": wf_id, "workflow_name": wf["name"],
+            "workflow_type": "targeting",
+            "timestamp": datetime.now().isoformat(),
+            "target": identifiers, "target_id": target_id,
+            "run_id": run_id,
+            "report_id": report["report_id"],
+            "final_report": report["final_report"],
+            "sections": report["sections"],
+            "network_analysis": network_analysis,
+            "agent_results": raw_results,
+            "store_stats": store_stats,
+            "report_version": report_version,
+            "summary": f"Targeting '{wf['name']}': {len(self.ALL_AGENTS)} agents. "
+                       f"New: {store_stats['new']}, Dupes: {store_stats['duplicate']}.",
+        }
+
+        self.workflows[wf_id]["last_run"] = datetime.now().isoformat()
+        self.workflows[wf_id]["last_results"] = results
+        if "run_history" not in self.workflows[wf_id]:
+            self.workflows[wf_id]["run_history"] = []
+        self.workflows[wf_id]["run_history"].append({
+            "run_id": run_id, "timestamp": results["timestamp"],
+            "store_stats": store_stats, "report_version": report_version,
+            "summary": results["summary"],
+        })
+        self.save_workflows()
+        return results
+
+
