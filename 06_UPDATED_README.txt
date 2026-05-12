@@ -1,6 +1,6 @@
-# LEO Agentic AI Platform V2 — Complete Tool Bible
+# Complete Tool Bible
 
-> **PURPOSE**: Dumb-proof documentation for the AI Agent Platform V2. Every script, every connection, every configuration. Step-by-step instructions for changing ANY tool, agent, prompt, or report — with exact file paths and exact locations.
+> **PURPOSE**: documentation for the AI Agent Platform V2. Every script, every connection, every configuration. Step-by-step instructions for changing ANY tool, agent, prompt, or report — with exact file paths and exact locations.
 
 ---
 
