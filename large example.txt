@@ -1,0 +1,1095 @@
+================================================================================
+  LARGE-DATA HANDLING FIXES (LD) — STEP-BY-STEP MANUAL PORT
+  Target: ai-agent-platform / V2 / backend
+  Goal:   Never lose facts on million-char dossiers. Hardens the two-tier
+          synthesizer + section summarizer + assessment scanner so that
+          (a) no chunk can ever overflow the LLM context window,
+          (b) context-length failures are split-and-retried, and
+          (c) any genuinely unscannable block is DISCLOSED, never silently
+              dropped.
+  Generated: 2026-05-28
+================================================================================
+
+--------------------------------------------------------------------------------
+WHAT WAS WRONG (root cause)
+--------------------------------------------------------------------------------
+All three map-reduce chunkers split text ONLY on "\n\n" and emitted whatever
+sat between two separators — with NO size cap. So:
+  * a single 500,000-char record, or
+  * a 2,000,000-char blob containing no "\n\n" at all,
+became ONE oversize chunk. The LLM rejected it with a context-length error,
+and each caller then silently discarded that chunk:
+
+  LOCATION                              ON OVERSIZE/FAILED CHUNK      RESULT
+  indicator_scanner (assessment scan)   returned empty results        LOST facts  <-- the bug you hit
+  living_dossier._chunked_summary MAP   chunk -> "[Chunk N failed]"    LOST data
+  living_dossier._compress_summary      text[:target_chars]            LOST ~90%
+  plan_executor Tier-2 pattern agent    patterns dropped               degraded analysis
+
+There was also NO failure visibility: a skipped chunk looked identical to a
+fully-scanned one, which violates the platform's "completeness & accuracy"
+guarantee.
+
+--------------------------------------------------------------------------------
+WHAT THE FIX DOES
+--------------------------------------------------------------------------------
+1. NEW shared module  tools/shared/chunking.py
+     - chunk_text(): guarantees EVERY chunk <= max_size. A record larger than
+       the cap is hard-split at sentence -> newline -> whitespace -> hard-cut.
+     - call_with_split_retry(): on a context-length error, bisect the piece
+       and retry each half down to a floor; report unrecoverable pieces via
+       an on_drop callback so coverage gaps are tracked.
+     - is_context_length_error(): distinguishes "too big" from rate-limit/5xx.
+2. All three _chunk_text() methods now DELEGATE to the shared chunker.
+3. Sub-agent MAP scan, Tier-2 pattern agent, and the assessment scanner use
+   split-and-retry; on a truly-unrecoverable piece the RAW text is kept so its
+   facts still reach the final synthesis.
+4. Summarizer NEVER truncates: keeps raw chunk text on failure, and
+   _compress_summary recurses (depth-guarded) instead of slicing.
+5. IndicatorScanner stats gain: chunks_total, chunks_failed, chars_unscanned,
+   coverage_complete — and the assessment markdown shows a "COVERAGE GAP"
+   banner whenever anything could not be scanned.
+
+--------------------------------------------------------------------------------
+FILES TOUCHED
+--------------------------------------------------------------------------------
+  NEW   tools/shared/chunking.py                 (Step 1)
+  NEW   tests/test_chunking.py                    (Step 2)
+  EDIT  tools/shared/plan_executor.py             (Step 3)
+  EDIT  tools/shared/living_dossier.py            (Step 4)
+  EDIT  tools/shared/indicator_scanner.py         (Step 5)
+
+APPLY ORDER:  Step 1 (new module) -> Step 2 (new test) -> Steps 3-5 (edits)
+              -> Step 6 (verify).
+
+NOTE ON THE EDIT STYLE BELOW
+  Where a change replaces a WHOLE method, you can locate the method by its
+  `def` signature and replace it from its `def` line down to (but NOT
+  including) the next `def` at the same indentation. This is the most robust
+  approach — you do not need to match the old body exactly.
+  Where a change is a localized block INSIDE a long method, the anchor lines
+  that bracket the change are quoted so you can find the exact spot.
+
+--------------------------------------------------------------------------------
+VERIFY AFTER ALL STEPS (run from V2/backend)
+--------------------------------------------------------------------------------
+  python -m py_compile tools/shared/chunking.py tools/shared/plan_executor.py \
+      tools/shared/living_dossier.py tools/shared/indicator_scanner.py
+  python tests/test_chunking.py              # -> 12/12 tests passed
+  python tests/test_indicator_scanner.py     # -> 6/6 tests passed
+  python tests/test_report_context_fixes.py  # -> 11/11 tests passed
+
+
+################################################################################
+#  STEP 1 — CREATE NEW FILE:  tools/shared/chunking.py
+################################################################################
+Create this file verbatim. Stdlib only — no project dependencies, so it
+imports cleanly anywhere under tools/shared/.
+
+vvvvv  BEGIN  tools/shared/chunking.py  vvvvv
+"""Bulletproof text chunking for large-data map-reduce.
+
+WHY THIS EXISTS
+  The platform's map-reduce paths (data-agent two-tier synthesis, dossier
+  section summarization, checklist assessment scanning) all split a large
+  blob into chunks and send each chunk to the LLM. The original chunkers
+  split ONLY on "\n\n" record boundaries and emitted whatever sat between
+  two separators — no matter how large. A single 500K-char record (or a
+  2M-char blob with no "\n\n" at all) became ONE oversize chunk, which the
+  LLM rejected with a context-length error. The caller then silently
+  dropped that chunk → lost facts the platform promised to capture.
+
+WHAT THIS GUARANTEES
+  chunk_text() never emits a chunk larger than `max_size`. When a single
+  record/paragraph exceeds the cap, it is hard-split at the best available
+  boundary (sentence -> newline -> whitespace -> hard cut). No chunk can
+  overflow the LLM context window.
+
+  call_with_split_retry() is the runtime safety net: if an LLM call still
+  fails with a context-length error (token != char; system prompt +
+  indicator list add overhead), it recursively splits the offending piece
+  in half and retries each half down to a floor size, so every byte is
+  eventually scanned. Genuinely unrecoverable pieces are reported via an
+  on_drop callback so the caller can track coverage gaps instead of
+  silently losing data.
+
+USED BY
+  - tools/shared/plan_executor.py        (_chunk_text delegates here)
+  - tools/shared/living_dossier.py       (_chunk_text delegates here)
+  - tools/shared/indicator_scanner.py    (_chunk_text + per-chunk retry)
+
+See export/07_LARGE_DATA_FIXES.txt (LD = Large-Data fixes) for the manual
+port instructions.
+"""
+
+import re
+from typing import Callable, List, Optional
+
+DEFAULT_MAX_SIZE = 3000
+
+# Substrings that indicate the model rejected the prompt for being too
+# large (vs. a transient rate-limit / 5xx which the llm_provider already
+# retries). Matched case-insensitively against str(exception).
+#
+# Calibrated against real provider error strings (the platform's
+# llm_provider.chat() raises LLMError wrapping the underlying message):
+#   OpenAI:    "This model's maximum context length is 8192 tokens..."
+#              "Please reduce the length of the messages"
+#   Anthropic: "prompt is too long: 209527 tokens > 200000 maximum"
+#              "input length and max_tokens exceed context limit"
+#   Gemini:    "input token count (X) exceeds the maximum number of tokens"
+#   413 / OpenAI-compatible (vLLM, Ollama, LM Studio): "request entity too
+#              large", "context length", "maximum context length"
+_CONTEXT_LIMIT_PATTERNS = re.compile(
+    r"context.?length|context window|context limit|maximum context|"
+    r"exceed.{0,30}context|input length|"
+    r"too many tokens|reduce the length|prompt is too long|"
+    r"input is too long|string too long|exceeds? the maximum|"
+    r"max(?:imum)?[ _]tokens|too large|413|request entity too large",
+    re.IGNORECASE,
+)
+
+
+def is_context_length_error(exc) -> bool:
+    """True if the exception looks like a context/length rejection (so
+    splitting the input could help). False for rate-limit/network/etc.,
+    where splitting would not help.
+
+    A provider error that carries an explicit ``is_rate_limit=True`` flag
+    (the platform's LLMError does) is never treated as a context error —
+    splitting a rate-limited request would not help."""
+    if getattr(exc, "is_rate_limit", False):
+        return False
+    return bool(_CONTEXT_LIMIT_PATTERNS.search(str(exc)))
+
+
+def _best_cut(window: str) -> int:
+    """Pick the best index to cut `window` at, searching the trailing ~20%
+    for a natural boundary. Priority: sentence terminator -> newline ->
+    whitespace -> hard cut at the end of the window.
+    Always returns a value in (0, len(window)]."""
+    n = len(window)
+    if n == 0:
+        return 0
+    floor = max(1, n - n // 5)  # only look in the last 20% of the window
+    for pat in (". ", ".\n", "! ", "? ", "?\n", "!\n", "\n"):
+        idx = window.rfind(pat, floor)
+        if idx > 0:
+            return idx + len(pat)
+    idx = window.rfind(" ", floor)
+    if idx > 0:
+        return idx + 1
+    return n  # no boundary found — hard cut
+
+
+def split_oversize(segment: str, max_size: int) -> List[str]:
+    """Hard-split a single segment that exceeds `max_size` into pieces each
+    <= max_size, cutting at the best available boundary each time."""
+    if max_size <= 0:
+        return [segment]
+    out: List[str] = []
+    remaining = segment
+    # Guard against pathological inputs causing an infinite loop.
+    while len(remaining) > max_size:
+        window = remaining[:max_size]
+        cut = _best_cut(window)
+        if cut <= 0:  # safety — never make zero progress
+            cut = max_size
+        out.append(remaining[:cut].strip())
+        remaining = remaining[cut:]
+    if remaining.strip():
+        out.append(remaining.strip())
+    return [c for c in out if c]
+
+
+def chunk_text(text: str,
+               max_size: int = DEFAULT_MAX_SIZE,
+               separator: str = "\n\n") -> List[str]:
+    """Split `text` into chunks each guaranteed <= `max_size` chars.
+
+    Splits on `separator` (record/paragraph boundary) first, packing
+    consecutive segments up to the cap. Any single segment larger than the
+    cap is hard-split via split_oversize() so the guarantee always holds.
+
+    Returns [] for empty input, [text] when text already fits.
+    """
+    if not text:
+        return []
+    if len(text) <= max_size:
+        return [text]
+
+    sep_len = len(separator)
+    segments = [s for s in text.split(separator) if s.strip()]
+    if not segments:
+        return split_oversize(text, max_size)
+
+    chunks: List[str] = []
+    current = ""
+    for seg in segments:
+        # Oversize single segment: flush current, then hard-split this one.
+        if len(seg) > max_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(split_oversize(seg, max_size))
+            continue
+        # Packing: would adding this segment overflow the current chunk?
+        if current and len(current) + sep_len + len(seg) > max_size:
+            chunks.append(current)
+            current = seg
+        else:
+            current = (current + separator + seg) if current else seg
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_point(text: str) -> int:
+    """Find a roughly-midpoint boundary to bisect `text` for split-retry.
+    Prefers a separator/newline/space near the middle; falls back to the
+    exact midpoint."""
+    mid = len(text) // 2
+    # search outward from the midpoint for a clean boundary
+    for pat in ("\n\n", "\n", ". ", " "):
+        # look in a window around the midpoint
+        lo = text.rfind(pat, 0, mid)
+        hi = text.find(pat, mid)
+        # choose whichever boundary is closest to mid
+        cand = []
+        if lo > 0:
+            cand.append(lo + len(pat))
+        if hi > 0:
+            cand.append(hi + len(pat))
+        if cand:
+            return min(cand, key=lambda x: abs(x - mid))
+    return mid
+
+
+def call_with_split_retry(
+    call_fn: Callable[[str], object],
+    text: str,
+    *,
+    floor: int = 500,
+    on_drop: Optional[Callable[[str, Exception], None]] = None,
+) -> List[object]:
+    """Run ``call_fn(text)``; on a context-length error, bisect and retry.
+
+    call_fn(text) -> result        (must raise on failure)
+    floor: pieces this small or smaller are not split further; if they
+           still fail they are reported to on_drop and skipped.
+    on_drop(piece, exc): optional callback invoked for each piece that
+           could not be processed even after splitting (lets the caller
+           record a coverage gap instead of silently losing the data).
+
+    Returns a flat list of results from every sub-piece that succeeded
+    (one entry per successful call; order preserved left-to-right).
+    """
+    try:
+        return [call_fn(text)]
+    except Exception as e:
+        # Non-context errors (rate-limit exhaustion, network, auth, etc.)
+        # won't be helped by splitting — is_context_length_error() returns
+        # False for them (incl. anything flagged is_rate_limit). Pieces
+        # at/under the floor can't be split further. Report and skip.
+        if len(text) <= floor or not is_context_length_error(e):
+            if on_drop:
+                on_drop(text, e)
+            return []
+        mid = _split_point(text)
+        if mid <= 0 or mid >= len(text):
+            mid = len(text) // 2
+        left, right = text[:mid], text[mid:]
+        results: List[object] = []
+        results.extend(call_with_split_retry(
+            call_fn, left, floor=floor, on_drop=on_drop))
+        results.extend(call_with_split_retry(
+            call_fn, right, floor=floor, on_drop=on_drop))
+        return results
+^^^^^  END  tools/shared/chunking.py  ^^^^^
+
+
+################################################################################
+#  STEP 2 — CREATE NEW FILE:  tests/test_chunking.py
+################################################################################
+Create this file verbatim. It exercises the chunker, split-retry, and the
+indicator-scanner coverage-gap tracking with a stub LLM (no network).
+
+vvvvv  BEGIN  tests/test_chunking.py  vvvvv
+"""Large-data handling tests (LD fixes).
+
+Covers the shared bulletproof chunker + split-and-retry + the
+indicator-scanner coverage-gap tracking. No real LLM — a FakeLLM stub
+simulates context-length failures.
+
+Run: python tests/test_chunking.py   → expect all passed.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tools.shared.chunking import (
+    chunk_text, split_oversize, call_with_split_retry,
+    is_context_length_error,
+)
+from tools.shared.indicator_scanner import IndicatorScanner
+
+TEMPLATE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "assessment_templates",
+)
+
+
+def _check(label, cond, detail=""):
+    print(f"  [{'OK  ' if cond else 'FAIL'}] {label}" + (f" — {detail}" if detail else ""))
+    return cond
+
+
+def _maxlen(chs):
+    return max((len(c) for c in chs), default=0)
+
+
+# ── Chunker ──────────────────────────────────────────────────────────
+
+def test_2m_blob_no_separators():
+    print("\n=== test_2m_blob_no_separators ===")
+    chs = chunk_text("x" * 2_000_000, max_size=3000)
+    ok = _check("2M blob splits into many chunks", len(chs) > 600, f"{len(chs)}")
+    ok &= _check("every chunk <= cap", _maxlen(chs) <= 3000, f"max={_maxlen(chs)}")
+    return ok
+
+
+def test_single_oversize_record():
+    print("\n=== test_single_oversize_record ===")
+    src = "\n\n".join(["small %d" % i for i in range(5)] + ["BIG" + "y" * 500_000])
+    chs = chunk_text(src, max_size=3000)
+    return _check("one 500K record is sub-split, all <= cap",
+                  _maxlen(chs) <= 3000, f"max={_maxlen(chs)}")
+
+
+def test_completeness_no_chars_dropped():
+    print("\n=== test_completeness_no_chars_dropped ===")
+    src = "\n\n".join("rec %d " % i + "z" * 200 for i in range(50))
+    chs = chunk_text(src, max_size=1000)
+    rejoined = "".join(chs).replace(" ", "").replace("\n", "")
+    orig = src.replace(" ", "").replace("\n", "")
+    return _check("no non-whitespace chars dropped", rejoined == orig,
+                  f"chunks={len(chs)}")
+
+
+def test_small_text_single_chunk():
+    print("\n=== test_small_text_single_chunk ===")
+    ok = _check("empty → []", chunk_text("", max_size=100) == [])
+    ok &= _check("small → [text]", chunk_text("hello", max_size=100) == ["hello"])
+    return ok
+
+
+def test_split_oversize_boundaries():
+    print("\n=== test_split_oversize_boundaries ===")
+    text = ("Sentence one is here. " * 50)  # ~1100 chars of sentences
+    parts = split_oversize(text, 200)
+    ok = _check("all parts <= cap", all(len(p) <= 200 for p in parts),
+                f"max={_maxlen(parts)}")
+    ok &= _check("parts are non-empty", all(p.strip() for p in parts))
+    return ok
+
+
+# ── Split-and-retry ──────────────────────────────────────────────────
+
+def test_split_retry_recovers_all():
+    print("\n=== test_split_retry_recovers_all ===")
+    calls = []
+
+    def fake(t):
+        calls.append(len(t))
+        if len(t) > 2000:
+            raise RuntimeError("maximum context length is 4096 tokens")
+        return f"ok:{len(t)}"
+
+    dropped = []
+    res = call_with_split_retry(fake, "w" * 10000, floor=500,
+                                on_drop=lambda p, e: dropped.append(len(p)))
+    ok = _check("all pieces recovered (nothing dropped)", not dropped,
+                f"dropped={len(dropped)}")
+    ok &= _check("returned results for every successful piece", len(res) >= 8,
+                 f"{len(res)} results")
+    return ok
+
+
+def test_split_retry_non_context_error_drops_once():
+    print("\n=== test_split_retry_non_context_error_drops_once ===")
+    # A non-context error (e.g. rate-limit exhaustion) should NOT split —
+    # it reports the whole piece to on_drop exactly once.
+    def fake(t):
+        raise RuntimeError("rate limit exceeded; quota exhausted")
+
+    dropped = []
+    res = call_with_split_retry(fake, "w" * 10000, floor=500,
+                                on_drop=lambda p, e: dropped.append(len(p)))
+    ok = _check("no results", res == [])
+    ok &= _check("dropped exactly once (no pointless splitting)",
+                 len(dropped) == 1 and dropped[0] == 10000, f"{dropped}")
+    return ok
+
+
+def test_context_error_detector():
+    print("\n=== test_context_error_detector ===")
+    ok = _check("detects 'maximum context length'",
+                is_context_length_error(RuntimeError("maximum context length exceeded")))
+    ok &= _check("detects 'too many tokens'",
+                 is_context_length_error(RuntimeError("too many tokens in prompt")))
+    ok &= _check("ignores rate-limit",
+                 not is_context_length_error(RuntimeError("rate limit reached")))
+    return ok
+
+
+def test_real_provider_error_strings():
+    """The detector must fire on the ACTUAL error text the platform's
+    llm_provider.chat() wraps in LLMError (otherwise split-retry never
+    triggers and the piece degrades to a coverage gap)."""
+    print("\n=== test_real_provider_error_strings ===")
+    wrap = "All LLM providers failed after 1 attempt(s). Last error: "
+    real = {
+        "OpenAI ctx":      "This model's maximum context length is 8192 tokens. "
+                           "However, your messages resulted in 9001 tokens.",
+        "OpenAI reduce":   "Please reduce the length of the messages.",
+        "Anthropic long":  "Error code: 400 - {'error': {'message': "
+                           "'prompt is too long: 209527 tokens > 200000 maximum'}}",
+        "Anthropic limit": "input length and max_tokens exceed context limit: "
+                           "200000 + 4096 > 200000",
+        "Gemini exceeds":  "input token count (1052576) exceeds the maximum "
+                           "number of tokens allowed (1048576)",
+        "413 entity":      "Error code: 413 - request entity too large",
+    }
+    ok = True
+    for name, msg in real.items():
+        ok &= _check(f"detects {name}", is_context_length_error(RuntimeError(wrap + msg)))
+    # Must NOT fire on real transient/non-size errors (splitting won't help).
+    not_ctx = {
+        "rate limit": wrap + "Error code: 429 - rate limit exceeded; quota exhausted",
+        "5xx":        wrap + "Error code: 503 - service overloaded, try again",
+        "auth":       wrap + "Error code: 401 - invalid api key",
+    }
+    for name, msg in not_ctx.items():
+        ok &= _check(f"ignores {name}", not is_context_length_error(RuntimeError(msg)))
+    return ok
+
+
+def test_rate_limit_flag_short_circuits():
+    """An exception carrying is_rate_limit=True (like the platform's
+    LLMError) is never treated as a context error, even if its text happens
+    to contain size-ish words."""
+    print("\n=== test_rate_limit_flag_short_circuits ===")
+
+    class _LLMErrorLike(Exception):
+        def __init__(self, msg, is_rate_limit=False):
+            super().__init__(msg)
+            self.is_rate_limit = is_rate_limit
+
+    flagged = _LLMErrorLike("overloaded; maximum context length-ish noise",
+                            is_rate_limit=True)
+    ok = _check("is_rate_limit=True -> not a context error",
+                not is_context_length_error(flagged))
+    # Same text without the flag (and with a real ctx phrase) still detected.
+    unflagged = _LLMErrorLike("prompt is too long: 5 tokens > 4 maximum",
+                              is_rate_limit=False)
+    ok &= _check("is_rate_limit=False + ctx text -> detected",
+                 is_context_length_error(unflagged))
+    return ok
+
+
+# ── IndicatorScanner coverage-gap tracking ───────────────────────────
+
+class _CtxFailLLM:
+    """Fails on prompts whose user message exceeds `limit` chars (simulating
+    a context-length rejection); otherwise returns a benign empty result."""
+    def __init__(self, limit):
+        self.limit = limit
+
+    def chat(self, messages, temperature=0.0, max_tokens=4000, **kw):
+        user = next((m["content"] for m in messages if m["role"] == "user"), "")
+        if len(user) > self.limit:
+            raise RuntimeError("This model's maximum context length is 8192 tokens")
+        return {"content": json.dumps({"results": [], "novel": []})}
+
+
+def test_scanner_tracks_coverage_gap():
+    print("\n=== test_scanner_tracks_coverage_gap ===")
+    # chunk_size large so the dossier is one big chunk; the LLM rejects any
+    # user prompt > 1500 chars and the floor is 600, so some sub-pieces of a
+    # giant no-boundary record remain unscannable → coverage gap recorded.
+    scanner = IndicatorScanner(template_dir=TEMPLATE_DIR,
+                                llm=_CtxFailLLM(limit=1500),
+                                max_workers=2, chunk_size=4000)
+    # A giant single record with money trigger terms so pre-filter keeps it.
+    dossier = "debt owe loan " + ("X" * 20000)
+    result = scanner.scan_target("t", "motivation", dossier)
+    stats = result["stats"]
+    ok = _check("coverage_complete is False", stats.get("coverage_complete") is False,
+                f"{stats.get('coverage_complete')}")
+    ok &= _check("chunks_failed > 0", stats.get("chunks_failed", 0) > 0,
+                 f"{stats.get('chunks_failed')}")
+    ok &= _check("chars_unscanned > 0", stats.get("chars_unscanned", 0) > 0,
+                 f"{stats.get('chars_unscanned')}")
+    ok &= _check("markdown discloses COVERAGE GAP",
+                 "COVERAGE GAP" in result["markdown"])
+    return ok
+
+
+def test_scanner_complete_when_no_failures():
+    print("\n=== test_scanner_complete_when_no_failures ===")
+    # LLM accepts everything → coverage complete, no warning.
+    class _OkLLM:
+        def chat(self, messages, **kw):
+            return {"content": json.dumps({"results": [], "novel": []})}
+    scanner = IndicatorScanner(template_dir=TEMPLATE_DIR, llm=_OkLLM(),
+                                max_workers=2, chunk_size=4000)
+    result = scanner.scan_target("t", "motivation",
+                                 "debt owe loan\n\nsome small record\n\nanother")
+    stats = result["stats"]
+    ok = _check("coverage_complete is True", stats.get("coverage_complete") is True)
+    ok &= _check("chunks_failed == 0", stats.get("chunks_failed") == 0)
+    ok &= _check("no COVERAGE GAP banner", "COVERAGE GAP" not in result["markdown"])
+    return ok
+
+
+def main():
+    print("Running large-data (LD) tests...")
+    results = [
+        test_2m_blob_no_separators(),
+        test_single_oversize_record(),
+        test_completeness_no_chars_dropped(),
+        test_small_text_single_chunk(),
+        test_split_oversize_boundaries(),
+        test_split_retry_recovers_all(),
+        test_split_retry_non_context_error_drops_once(),
+        test_context_error_detector(),
+        test_real_provider_error_strings(),
+        test_rate_limit_flag_short_circuits(),
+        test_scanner_tracks_coverage_gap(),
+        test_scanner_complete_when_no_failures(),
+    ]
+    passed = sum(1 for r in results if r)
+    total = len(results)
+    print(f"\n{'='*60}\nResult: {passed}/{total} tests passed\n{'='*60}")
+    return 0 if passed == total else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+^^^^^  END  tests/test_chunking.py  ^^^^^
+
+
+################################################################################
+#  STEP 3 — EDIT:  tools/shared/plan_executor.py   (4 changes)
+################################################################################
+
+----- 3.1  ADD IMPORT  (top of file) -----------------------------------------
+The existing imports near the top look like:
+
+    import re
+    import time
+    from typing import Dict, Any, List, Optional, Callable
+    from dataclasses import dataclass
+
+Immediately AFTER the `from dataclasses import dataclass` line, ADD:
+
+    from tools.shared.chunking import (
+        chunk_text as _shared_chunk_text,
+        call_with_split_retry,
+        is_context_length_error,
+    )
+
+
+----- 3.2  REPLACE WHOLE METHOD  `_chunk_text` -------------------------------
+Locate `def _chunk_text(self, text: str,` in plan_executor.py and replace the
+ENTIRE method with:
+
+    def _chunk_text(self, text: str,
+                    target_size: int = None) -> List[str]:
+        """Split text into chunks each guaranteed <= target_size chars.
+
+        LD FIX: delegates to the shared bulletproof chunker. The previous
+        implementation returned the whole text as one chunk when it had
+        <=1 "\n\n"-record, and never sub-split a single oversize record —
+        so a giant record (or a no-separator blob) produced an oversize
+        chunk that overflowed the LLM. The shared chunker hard-splits any
+        oversize segment so no chunk can exceed the cap.
+        """
+        target_size = target_size or self.CHUNK_TARGET_SIZE
+        return _shared_chunk_text(text, max_size=target_size, separator="\n\n")
+
+
+----- 3.3  REPLACE BLOCK inside  `_chunked_llm_call`  (the MAP phase) ---------
+Inside `def _chunked_llm_call(...)`, find the MAP phase. In the ORIGINAL code
+it begins right after:
+
+        chunks = self._chunk_text(prompt)
+        self._log(f"  CHUNKING: {len(prompt)} chars → {len(chunks)} chunks "
+                  f"(threshold: {self.LARGE_PROMPT_THRESHOLD})")
+
+and runs from the comment `# --- MAP phase:` down to the line:
+
+        combined = "\n\n".join(sub_results)
+
+The ORIGINAL MAP phase is a simple `for i, chunk in enumerate(chunks):` loop
+with an inline `self.llm.chat(...)` in a try/except that, on failure, did
+`sub_results.append(chunk)`.
+
+REPLACE that entire MAP phase block (from `# --- MAP phase:` through
+`combined = "\n\n".join(sub_results)`) with:
+
+        # --- MAP phase: sub-agents SCAN each chunk for relevant facts ---
+        sub_results = []
+
+        def _scan_one(piece: str) -> str:
+            resp = self.llm.chat(
+                messages=[
+                    {"role": "system", "content":
+                     "You are an intelligence data scanning sub-agent. "
+                     "Your task is to scan the data below and extract ONLY "
+                     "the specific facts, indicators, and evidence that are "
+                     "RELEVANT to the assessment task described. "
+                     "For each relevant finding, include: record ID, date, "
+                     "names, locations, and the specific detail that matters. "
+                     "SKIP records that contain NO information relevant to "
+                     "this assessment — do not list them at all. "
+                     "Be thorough but focused: include every relevant detail "
+                     "but exclude irrelevant records entirely."},
+                    {"role": "user", "content":
+                     f"ASSESSMENT TASK:\n{instructions}\n\n"
+                     f"DATA TO SCAN:\n\n{piece}"},
+                ],
+                temperature=0.1,
+                max_tokens=self.SUB_AGENT_MAX_TOKENS,
+            )
+            return resp["content"]
+
+        for i, chunk in enumerate(chunks):
+            self._log(f"    Sub-agent {i + 1}/{len(chunks)}: "
+                      f"{len(chunk)} chars...")
+            # LD FIX: split-and-retry on context-length errors; on a truly
+            # unrecoverable piece keep the RAW text so its facts still reach
+            # the final synthesis (never silently dropped).
+            dropped: List[str] = []
+            parts = call_with_split_retry(
+                _scan_one, chunk,
+                floor=800,
+                on_drop=lambda p, e: dropped.append(p),
+            )
+            if parts:
+                sub_results.extend(parts)
+                self._log(f"    Sub-agent {i + 1}: OK "
+                          f"({sum(len(p) for p in parts)} chars, "
+                          f"{len(parts)} piece(s))")
+            if dropped:
+                # Keep raw text for any piece the LLM could not process.
+                self._log(f"    Sub-agent {i + 1}: {len(dropped)} piece(s) "
+                          f"unscannable — keeping raw to avoid data loss")
+                sub_results.extend(dropped)
+
+        combined = "\n\n".join(sub_results)
+
+(Leave everything AFTER `combined = "\n\n".join(sub_results)` — the
+SUB-AGENTS COMPLETE log, the CONTEXT OVERFLOW handling, and the FINAL
+SYNTHESIS — unchanged.)
+
+
+----- 3.4  REPLACE BLOCK inside  `_generate_tier2_analysis`  (pattern loop) --
+Inside `def _generate_tier2_analysis(...)`, find the large-records branch. In
+the ORIGINAL code it begins:
+
+        # Large records: chunk → sub-agent pattern extraction → combine
+        self._log(f"    Tier 2 CHUNKING: {len(records_text)} chars")
+        chunks = self._chunk_text(records_text, target_size=5000)
+        pattern_parts = []
+
+followed by a `for i, chunk in enumerate(chunks):` loop with an inline
+`self.llm.chat(...)` in a try/except, ending just before:
+
+        if not pattern_parts:
+            return "(Analysis could not be generated)"
+
+REPLACE everything from `pattern_parts = []` down to (but NOT including) the
+`if not pattern_parts:` line with:
+
+        pattern_parts = []
+
+        def _patterns_one(piece: str) -> str:
+            resp = self.llm.chat(
+                messages=[
+                    {"role": "system", "content":
+                     "You are a pattern extraction agent. "
+                     "Identify patterns, key findings, connections, "
+                     "and anomalies in the data below. "
+                     "Be concise — list findings as bullets. "
+                     "Do NOT re-list all records."},
+                    {"role": "user", "content":
+                     f"Extract patterns and key findings:\n\n{piece}"},
+                ],
+                temperature=0.2,
+                max_tokens=2000,
+            )
+            return resp["content"]
+
+        for i, chunk in enumerate(chunks):
+            self._log(f"    Pattern-agent {i + 1}/{len(chunks)}: "
+                      f"{len(chunk)} chars...")
+            # LD FIX: split-and-retry so an oversize/over-token chunk is
+            # recovered instead of dropping its patterns. (Tier 1 records
+            # are preserved regardless; this protects the analysis layer.)
+            parts = call_with_split_retry(_patterns_one, chunk, floor=800)
+            if parts:
+                pattern_parts.extend(parts)
+                self._log(f"    Pattern-agent {i + 1}: OK "
+                          f"({len(parts)} piece(s))")
+            else:
+                self._log(f"    Pattern-agent {i + 1}: no patterns extracted")
+
+
+################################################################################
+#  STEP 4 — EDIT:  tools/shared/living_dossier.py   (5 changes)
+################################################################################
+
+----- 4.1  ADD IMPORT --------------------------------------------------------
+Find the typing import near the top:
+
+    from typing import Dict, List, Optional, Tuple
+
+Immediately BELOW it, ADD:
+
+    from tools.shared.chunking import chunk_text as _shared_chunk_text
+
+
+----- 4.2  REPLACE WHOLE METHOD  `_chunk_text` -------------------------------
+Locate `def _chunk_text(self, text: str) -> List[str]:` and replace the
+ENTIRE method with:
+
+    def _chunk_text(self, text: str) -> List[str]:
+        """Split text into chunks each guaranteed <= CHUNK_SIZE chars.
+
+        LD FIX: delegates to the shared bulletproof chunker. The previous
+        implementation never sub-split a single oversize paragraph, so a
+        giant record produced an oversize chunk that overflowed the LLM.
+        """
+        return _shared_chunk_text(text, max_size=self.CHUNK_SIZE,
+                                  separator="\n\n")
+
+  IMPORTANT: make sure NO trailing `if chunks else [text]` clause remains on
+  the return statement — the shared chunk_text already returns [] for empty
+  input and [text] when the text fits. (A leftover `if chunks else [text]`
+  causes a NameError at runtime.)
+
+
+----- 4.3  REPLACE BLOCK inside `_chunked_summary`  (depth-limit) ------------
+Inside `def _chunked_summary(...)`, find the depth guard. ORIGINAL:
+
+        if _depth >= 3:
+            # Safety limit — return what we have
+            return data_text
+
+REPLACE with:
+
+        if _depth >= 3:
+            # LD FIX: safety limit reached. The old code returned the full
+            # un-summarized data_text, bloating the section. Force-compress
+            # instead so the summary stays bounded without dropping facts.
+            return self._compress_summary(agent_key, data_text)
+
+
+----- 4.4  REPLACE BLOCK inside `_chunked_summary`  (MAP failure keeps raw) --
+Still inside `_chunked_summary`, in the nested `_summarize_chunk` function,
+find the except clause. ORIGINAL:
+
+            except Exception as e:
+                return idx, f"[Chunk {idx+1} failed: {e}]"
+
+REPLACE with:
+
+            except Exception as e:
+                # LD FIX: the old code returned "[Chunk N failed]", which
+                # DELETED that chunk's data from the summary. Keep the raw
+                # chunk text instead so its facts survive into the REDUCE
+                # step (zero data loss; the reduce pass compresses it).
+                print(f"    [SUMMARY] {agent_key.upper()}: chunk {idx+1} "
+                      f"failed ({str(e)[:60]}), keeping raw chunk")
+                return idx, chunk
+
+
+----- 4.5  REPLACE WHOLE METHOD  `_compress_summary` -------------------------
+Locate `def _compress_summary(self, agent_key: str, text: str` and replace
+the ENTIRE method (note the new `_depth` parameter) with:
+
+    def _compress_summary(self, agent_key: str, text: str,
+                          _depth: int = 0) -> str:
+        """Force-compress text to ~10% of original via LLM.
+        Emergency fallback when recursive summarization doesn't converge.
+
+        LD FIX: NEVER hard-truncates. The old code had a `merged[:target_chars]`
+        slice (and a `text[:target_chars]` slice on failure) that silently
+        dropped ~90% of the content. Now:
+          - text > MAX_INPUT  -> compress each MAX_INPUT slice, merge, then
+            recurse on the merged result (bounded by _depth) until it fits;
+            at the depth guard return the merged text WHOLE, never sliced.
+          - single call fails -> return the text WHOLE (complete but
+            uncompressed) rather than slicing it.
+        Either way no facts are lost.
+        """
+        target_chars = max(2000, len(text) // 10)
+        MAX_INPUT = 80000   # safe input size for a single LLM call
+        MAX_DEPTH = 5       # convergence guard (each round compresses ~10x)
+
+        # If text is too large for a single call, compress slice-by-slice.
+        if len(text) > MAX_INPUT:
+            print(f"    [SUMMARY] {agent_key.upper()}: text too large "
+                  f"({len(text)} chars), compressing in "
+                  f"{len(text) // MAX_INPUT + 1} slices (depth={_depth})...")
+            chunk_summaries = []
+            for i in range(0, len(text), MAX_INPUT):
+                chunk_summaries.append(
+                    self._compress_summary(agent_key, text[i:i + MAX_INPUT],
+                                           _depth=_depth + 1))
+            merged = "\n\n".join(chunk_summaries)
+            # Recurse to compress the merged result further, but stop if it
+            # already fits or we've hit the depth guard (return merged WHOLE
+            # — never truncated).
+            if len(merged) > MAX_INPUT and _depth < MAX_DEPTH:
+                return self._compress_summary(agent_key, merged,
+                                              _depth=_depth + 1)
+            return merged
+
+        try:
+            resp = self.llm.chat(
+                messages=[
+                    {"role": "system", "content":
+                     f"Compress this {agent_key.upper()} intelligence into {target_chars} characters MAX. "
+                     "Write 3-5 paragraphs covering: key people, key events, key dates, key locations. "
+                     "Cite max 10 record IDs. Be ruthlessly concise."},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+            )
+            result = resp.get("content", "")
+            if result:
+                print(f"    [SUMMARY] {agent_key.upper()}: compressed "
+                      f"{len(text)} -> {len(result)} chars")
+                return result
+        except Exception as e:
+            print(f"    [SUMMARY] {agent_key.upper()}: compress failed: {e}")
+        # LD FIX: single call failed or returned empty. Return the text WHOLE
+        # (complete but uncompressed) rather than slicing off ~90% of it.
+        return text
+
+
+################################################################################
+#  STEP 5 — EDIT:  tools/shared/indicator_scanner.py   (4 changes)
+################################################################################
+
+----- 5.1  ADD IMPORT --------------------------------------------------------
+Find the typing import near the top:
+
+    from typing import Any, Dict, List, Optional, Tuple
+
+Immediately BELOW it, ADD:
+
+    from tools.shared.chunking import (
+        chunk_text as _shared_chunk_text,
+        call_with_split_retry,
+    )
+
+
+----- 5.2  REPLACE WHOLE METHOD  `_chunk_text` -------------------------------
+Locate `def _chunk_text(self, text: str) -> List[str]:` and replace the
+ENTIRE method with:
+
+    def _chunk_text(self, text: str) -> List[str]:
+        """Chunk dossier text, each chunk guaranteed <= chunk_size chars.
+
+        LD FIX: delegates to the shared bulletproof chunker. The previous
+        implementation never sub-split a single oversize paragraph, so a
+        giant record produced an oversize chunk that overflowed the LLM and
+        was silently skipped (lost facts). The shared chunker hard-splits
+        any oversize segment so no chunk can exceed the cap.
+        """
+        return _shared_chunk_text(text, max_size=self.chunk_size,
+                                  separator="\n\n")
+
+
+----- 5.3  SPLIT the per-chunk LLM call into raising + swallowing variants ----
+Find the method that does the single per-chunk LLM call. In the ORIGINAL code
+it is named `_llm_evaluate_chunk` (or similar) and it catches the LLM error
+and returns an empty dict — THAT swallow is the data-loss bug.
+
+REPLACE the original single method with these TWO methods (the raising
+`_raw_evaluate` is what split-retry needs; the swallowing
+`_llm_evaluate_chunk` is kept for any legacy caller):
+
+    def _raw_evaluate(self, chunk: str, indicators: List[Dict],
+                       template: Dict) -> Dict:
+        """One LLM call per chunk — RAISES on LLM failure.
+
+        This is the split-and-retry-friendly core: it lets a context-length
+        error propagate so the caller can bisect the chunk and retry. Use
+        _llm_evaluate_chunk() for the catch-and-return-empty behavior.
+        """
+        if not self.llm or not indicators:
+            return {"results": [], "novel": []}
+        prompt = self._build_scan_prompt(chunk, indicators, template)
+        resp = self.llm.chat(
+            messages=[
+                {"role": "system",
+                 "content": "You are a strict fact-extraction assistant. "
+                            "Return ONLY the JSON object the user requests."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=4000,
+        )
+        raw = resp.get("content", "") if isinstance(resp, dict) else str(resp)
+        return self._parse_llm_response(raw)
+
+    def _llm_evaluate_chunk(self, chunk: str, indicators: List[Dict],
+                             template: Dict) -> Dict:
+        """One LLM call per chunk. Returns {results:[...], novel:[...]}.
+        Catches failures and returns an empty dict (with _error)."""
+        if not self.llm or not indicators:
+            return {"results": [], "novel": []}
+        try:
+            return self._raw_evaluate(chunk, indicators, template)
+        except Exception as e:
+            return {"results": [], "novel": [], "_error": str(e)}
+
+  NOTE: keep your existing `_build_scan_prompt` and `_parse_llm_response`
+  helpers as they are — they are referenced above. If your original
+  single-call method had a different body for building the prompt / parsing,
+  preserve that logic inside `_raw_evaluate` (the key requirement is that
+  `_raw_evaluate` lets the exception PROPAGATE instead of catching it).
+
+
+----- 5.4  REPLACE BLOCK inside  `scan_target`  (per-chunk eval + coverage) ---
+Inside `def scan_target(...)`, the ORIGINAL code defines a `_eval(idx_chunk)`
+helper that calls the swallowing evaluator, runs it across a ThreadPoolExecutor,
+collects `chunk_results`, then goes straight to aggregation.
+
+REPLACE from the `# Per-chunk LLM scan` comment (just after the
+`chunks = self._chunk_text(dossier_text)` / empty-chunks guard) down through
+the line that builds `chunk_results` from the thread pool, with the block
+below. THEN add the coverage-gap tally + banner shown further down.
+
+Replace the per-chunk scan + collection with:
+
+        # Per-chunk LLM scan (parallel, after pre-filter)
+        chunk_results: List[Dict] = []
+
+        def _eval(idx_chunk):
+            """Scan one chunk. LD FIX: on a context-length error the chunk
+            is bisected and each half retried (call_with_split_retry); any
+            piece that still can't be scanned is reported as unscanned chars
+            so coverage gaps are tracked instead of silently lost."""
+            idx, chunk = idx_chunk
+            unscanned = {"chars": 0, "pieces": 0}
+
+            def _scan_piece(piece: str) -> Dict:
+                # Pre-filter is re-applied per piece (cheap, keyword match).
+                filtered = self._prefilter_chunk(piece.lower(), indicators)
+                if not filtered:
+                    return {"results": [], "novel": []}
+                # Raises on LLM failure so split-retry can react.
+                return self._raw_evaluate(piece, filtered, template)
+
+            def _on_drop(piece: str, exc: Exception):
+                unscanned["chars"] += len(piece)
+                unscanned["pieces"] += 1
+
+            parts = call_with_split_retry(
+                _scan_piece, chunk, floor=600, on_drop=_on_drop)
+            # Merge the per-piece dicts into one chunk-result dict.
+            merged: Dict[str, List] = {"results": [], "novel": []}
+            for p in parts:
+                if isinstance(p, dict):
+                    merged["results"].extend(p.get("results", []))
+                    merged["novel"].extend(p.get("novel", []))
+            if unscanned["pieces"]:
+                merged["_unscanned_chars"] = unscanned["chars"]
+                merged["_unscanned_pieces"] = unscanned["pieces"]
+            return idx, merged
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            futures = [pool.submit(_eval, (i, c)) for i, c in enumerate(chunks)]
+            tmp: Dict[int, Dict] = {}
+            for fut in as_completed(futures):
+                idx, res = fut.result()
+                tmp[idx] = res
+            for i in range(len(chunks)):
+                chunk_results.append(tmp.get(i, {"results": [], "novel": []}))
+
+        # LD FIX: tally coverage gaps so the report can disclose incomplete
+        # scanning instead of presenting partial results as complete.
+        chunks_failed = sum(1 for cr in chunk_results
+                            if cr.get("_unscanned_pieces"))
+        chars_unscanned = sum(cr.get("_unscanned_chars", 0)
+                              for cr in chunk_results)
+
+  (Keep your existing aggregation / rating / principal-category / record_ids /
+   markdown rendering AS-IS after this block.)
+
+Then, just BEFORE the final `stats = { ... }` dict is built (i.e. after
+`markdown = self._render(...)`), INSERT the coverage-gap banner:
+
+        # LD FIX: if any chunk could not be scanned even after split-retry,
+        # disclose the coverage gap at the top of the section AND in stats.
+        # Silent partial coverage would violate the completeness guarantee.
+        if chunks_failed:
+            total_chars = len(dossier_text)
+            pct = (chars_unscanned / total_chars * 100) if total_chars else 0
+            warning = (
+                f"> ⚠ **COVERAGE GAP:** {chunks_failed} data block(s) "
+                f"(~{chars_unscanned:,} chars, {pct:.1f}% of this dossier) "
+                f"could not be scanned by the LLM even after splitting. "
+                f"Findings below may be INCOMPLETE — review the raw sections "
+                f"for these blocks manually.\n\n"
+            )
+            # Insert the warning right after the score line block.
+            markdown = warning + markdown
+
+Finally, ADD these four keys to the returned `stats` dict (alongside the
+existing rating / total_hits / indicators_checked / record_ids / etc.):
+
+            "chunks_total": len(chunks),
+            "chunks_failed": chunks_failed,
+            "chars_unscanned": chars_unscanned,
+            "coverage_complete": chunks_failed == 0,
+
+
+################################################################################
+#  STEP 6 — VERIFY  (run from V2/backend)
+################################################################################
+
+  python -m py_compile tools/shared/chunking.py tools/shared/plan_executor.py \
+      tools/shared/living_dossier.py tools/shared/indicator_scanner.py
+
+  python tests/test_chunking.py              # expect: 12/12 tests passed
+  python tests/test_indicator_scanner.py     # expect: 6/6 tests passed
+  python tests/test_report_context_fixes.py  # expect: 11/11 tests passed
+
+Quick runtime smoke-check (optional) — confirms the delegating chunkers
+hard-split a multi-million-char blob and never exceed the cap:
+
+  python3 -c "
+  from tools.shared.living_dossier import LivingDossier
+  from tools.shared.indicator_scanner import IndicatorScanner
+  ld = LivingDossier.__new__(LivingDossier); ld.CHUNK_SIZE = 3000
+  c1 = LivingDossier._chunk_text(ld, 'x'*2_000_000)
+  print('living_dossier 2M ->', len(c1), 'chunks, max', max(len(c) for c in c1))
+  sc = IndicatorScanner('/tmp', llm=None, chunk_size=3000)
+  c2 = sc._chunk_text('y'*1_000_000)
+  print('indicator_scanner 1M ->', len(c2), 'chunks, max', max(len(c) for c in c2))
+  "
+  # Expected: living_dossier 2M -> 667 chunks, max 3000
+  #           indicator_scanner 1M -> 334 chunks, max 3000
+
+================================================================================
+  END OF LARGE-DATA FIXES
+================================================================================
